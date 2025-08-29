@@ -626,6 +626,21 @@ function enableCanvasInteractions() {
         const det = detectionResults[selectedDetectionIndex];
         if (!det || !Array.isArray(det.polygon)) return;
 
+        // Ctrl + 点击边缘 -> 在该边插入新顶点并进入拖拽
+        if (evt.ctrlKey) {
+            const { edgeIndex, point } = findNearbyEdge(det.polygon, pos.x, pos.y, 8);
+            if (edgeIndex !== -1 && point) {
+                const insertAt = edgeIndex + 1;
+                det.polygon.splice(insertAt, 0, point);
+                updateBoxFromPolygon(det);
+                baseRenderReady = false;
+                buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
+                isDraggingVertex = true;
+                draggingVertexIndex = insertAt;
+                return;
+            }
+        }
+
         // Alt+点击已存在多边形的顶点 -> 删除该点（编辑已有分割）
         if (evt.altKey) {
             const vIdx = findNearbyVertex(det.polygon, pos.x, pos.y, 8);
@@ -892,6 +907,31 @@ function findNearbyVertex(poly, x, y, tol = 6) {
         if (Math.hypot(px - x, py - y) <= tol) return i;
     }
     return -1;
+}
+
+// 在多边形边缘附近查找可插入的新顶点位置
+function closestPointOnSegment(x1, y1, x2, y2, px, py) {
+    const vx = x2 - x1, vy = y2 - y1;
+    const wx = px - x1, wy = py - y1;
+    const len2 = vx * vx + vy * vy || 1e-9;
+    let t = (vx * wx + vy * wy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return { x: x1 + t * vx, y: y1 + t * vy };
+}
+
+function findNearbyEdge(poly, x, y, tol = 8) {
+    let best = { edgeIndex: -1, point: null, dist: Infinity };
+    for (let i = 0; i < poly.length; i++) {
+        const a = poly[i];
+        const b = poly[(i + 1) % poly.length];
+        const cp = closestPointOnSegment(a[0], a[1], b[0], b[1], x, y);
+        const d = Math.hypot(cp.x - x, cp.y - y);
+        if (d < best.dist) {
+            best = { edgeIndex: i, point: [Math.round(cp.x), Math.round(cp.y)], dist: d };
+        }
+    }
+    if (best.dist <= tol) return { edgeIndex: best.edgeIndex, point: best.point };
+    return { edgeIndex: -1, point: null };
 }
 
 function pointInPolygon(x, y, polygon) {
