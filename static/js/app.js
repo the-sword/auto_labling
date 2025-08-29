@@ -22,6 +22,30 @@ const detectionsList = document.getElementById('detectionsList');
 const loadingOverlay = document.getElementById('loadingOverlay');
 const errorModal = new bootstrap.Modal(document.getElementById('errorModal'));
 
+// 预定义标签（可点击快速添加）
+const PREDEFINED_LABELS = [
+    'obstacle',
+    'stool',
+    'fence',
+    'aldult',
+    'pet',
+    'leaf',
+    'charging station',
+    'manhole cover',
+    'water',
+    'flagstone',
+    'Flat spray can',
+    'pipeline',
+    'mud',
+    'child',
+    'hedgehog',
+    'fruilt',
+    'green plants',
+    'grass',
+    'road',
+    'background'
+];
+
 // 颜色生成函数
 function generateRandomColor() {
     const colors = [
@@ -30,6 +54,25 @@ function generateRandomColor() {
         '#F8C471', '#82E0AA', '#F1948A', '#85C1E9', '#D7BDE2'
     ];
     return colors[Math.floor(Math.random() * colors.length)];
+}
+
+// 预填充目标标签列表
+function prefillTargetLabels() {
+    currentLabels = [...PREDEFINED_LABELS];
+    updateLabelsDisplay();
+    updateSegmentButton();
+}
+
+// 渲染示例标签（基于预定义列表）
+function renderExampleTags() {
+    const container = document.querySelector('.example-tags');
+    if (!container) return;
+    // 仅当容器为空时再渲染，避免覆盖服务端已渲染的内容
+    if (container.children.length === 0) {
+        container.innerHTML = PREDEFINED_LABELS
+            .map(l => `<span class="badge bg-light text-dark me-1 mb-1 example-tag">${l}</span>`)
+            .join('');
+    }
 }
 
 // 初始化事件监听器
@@ -49,16 +92,19 @@ function initializeEventListeners() {
         }
     });
 
-    // 示例标签点击
-    document.querySelectorAll('.example-tag').forEach(tag => {
-        tag.addEventListener('click', () => {
+    // 示例标签点击（事件代理，兼容服务端/前端渲染）
+    const exampleTagsContainer = document.querySelector('.example-tags');
+    if (exampleTagsContainer) {
+        exampleTagsContainer.addEventListener('click', (e) => {
+            const tag = e.target.closest('.example-tag');
+            if (!tag) return;
             const label = tag.textContent.trim();
             if (!currentLabels.includes(label)) {
                 addLabelToArray(label);
                 updateLabelsDisplay();
             }
         });
-    });
+    }
 
     // 参数设置
     thresholdSlider.addEventListener('input', (e) => {
@@ -341,6 +387,10 @@ function showError(message) {
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
+    // 先渲染示例标签，再绑定事件
+    renderExampleTags();
+    // 预填充目标标签列表
+    prefillTargetLabels();
     initializeEventListeners();
     updateSegmentButton();
 });
