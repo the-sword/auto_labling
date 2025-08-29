@@ -604,7 +604,8 @@ function displayDetectionsList(detections) {
 
     detections.forEach((detection, index) => {
         const detectionItem = document.createElement('div');
-        detectionItem.className = 'detection-item fade-in';
+        detectionItem.className = `detection-item fade-in ${index === selectedDetectionIndex ? 'selected' : ''}`.trim();
+        detectionItem.setAttribute('data-index', String(index));
         detectionItem.innerHTML = `
             <div class="d-flex justify-content-between align-items-start">
               <div class="detection-info" style="cursor: pointer;">
@@ -643,6 +644,20 @@ function displayDetectionsList(detections) {
             if (Number.isInteger(idx)) selectDetection(idx);
         }
     };
+    // 渲染后同步一次选中高亮（防止外部修改 selectedDetectionIndex 后需要手动触发）
+    updateDetectionListSelection();
+}
+
+// 同步结果列表的选中高亮
+function updateDetectionListSelection() {
+    if (!detectionsList) return;
+    const items = detectionsList.querySelectorAll('.detection-item');
+    items.forEach(el => {
+        const idx = parseInt(el.getAttribute('data-index'));
+        if (Number.isInteger(idx)) {
+            el.classList.toggle('selected', idx === selectedDetectionIndex);
+        }
+    });
 }
 
 // 清除结果
@@ -1093,6 +1108,7 @@ function selectDetection(index) {
     if (index < 0 || index >= detectionResults.length) return;
     selectedDetectionIndex = index;
     redraw();
+    updateDetectionListSelection();
 }
 
 function editLabelInline(index) {

@@ -207,6 +207,13 @@ body {
     height: 100%;
 }
 
+/* 选中项高亮（与画布联动） */
+.detection-item.selected {
+    background: #eef2ff;
+    border-left-color: #4f46e5;
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15) inset;
+}
+
 .detection-info {
     flex: 1;
 }
