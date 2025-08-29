@@ -104,36 +104,27 @@
             <!-- 主内容区域 -->
             <div class="col-md-9 main-content">
                 <div class="content-wrapper">
-                    <!-- 图片显示区域 -->
+                    <!-- 图片与分割结果并排显示区域 -->
                     <div class="image-section mb-4">
-                        <div class="image-container" id="imageContainer">
-                            <div class="placeholder-text">
-                                <i class="fas fa-image fa-4x mb-3"></i>
-                                <h4>请上传图片开始分割</h4>
-                                <p class="text-muted">支持JPG、PNG等常见图片格式</p>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>原图</h6>
+                                <div class="result-image-container">
+                                    <img id="originalImage" class="result-image" alt="原图">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>分割结果</h6>
+                                <div class="result-image-container">
+                                    <canvas id="resultCanvas" class="result-image"></canvas>
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     <!-- 结果显示区域 -->
                     <div class="results-section" id="resultsSection" style="display: none;">
-                        <h5><i class="fas fa-chart-bar"></i> 分割结果</h5>
-                        <div class="results-container">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <h6>原图</h6>
-                                    <div class="result-image-container">
-                                        <img id="originalImage" class="result-image" alt="原图">
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <h6>分割结果</h6>
-                                    <div class="result-image-container">
-                                        <canvas id="resultCanvas" class="result-image"></canvas>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        <h5><i class="fas fa-chart-bar"></i> 结果列表</h5>
 
                         <!-- 检测结果列表 -->
                         <div class="detections-list mt-3" id="detectionsList"></div>

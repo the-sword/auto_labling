@@ -10,7 +10,6 @@ let lastResultImageBase64 = null;  // 最近一次结果图像（用于重绘）
 // DOM元素
 const uploadArea = document.getElementById('uploadArea');
 const imageInput = document.getElementById('imageInput');
-const imageContainer = document.getElementById('imageContainer');
 const labelInput = document.getElementById('labelInput');
 const addLabelBtn = document.getElementById('addLabelBtn');
 const labelsList = document.getElementById('labelsList');
@@ -172,7 +171,10 @@ function loadImage(file) {
 
 // 显示图片
 function displayImage(imageSrc) {
-    imageContainer.innerHTML = `<img src="${imageSrc}" alt="上传的图片" style="max-width: 100%; max-height: 100%; object-fit: contain;">`;
+    // 直接显示到顶部的原图区域
+    if (originalImage) {
+        originalImage.src = imageSrc;
+    }
 }
 
 // 标签管理
@@ -423,13 +425,14 @@ function clearResults() {
     draggingVertexIndex = -1;
     isDraggingVertex = false;
 
-    imageContainer.innerHTML = `
-        <div class="placeholder-text">
-            <i class="fas fa-image fa-4x mb-3"></i>
-            <h4>请上传图片开始分割</h4>
-            <p class="text-muted">支持JPG、PNG等常见图片格式</p>
-        </div>
-    `;
+    // 清空顶部原图与结果画布
+    if (originalImage) originalImage.removeAttribute('src');
+    if (resultCanvas) {
+        const ctx = resultCanvas.getContext('2d');
+        ctx && ctx.clearRect(0, 0, resultCanvas.width || 0, resultCanvas.height || 0);
+        resultCanvas.width = 0;
+        resultCanvas.height = 0;
+    }
 
     labelsList.innerHTML = '';
     resultsSection.style.display = 'none';
