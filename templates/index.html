@@ -25,10 +25,11 @@
                         <div class="upload-area" id="uploadArea">
                             <div class="upload-content">
                                 <i class="fas fa-cloud-upload-alt fa-3x mb-3"></i>
-                                <p>点击或拖拽图片到此处</p>
-                                <input type="file" id="imageInput" accept="image/*" style="display: none;">
+                                <p>点击或拖拽图片/文件夹到此处（支持多选）</p>
+                                <input type="file" id="imageInput" accept="image/*" multiple webkitdirectory directory style="display: none;">
                             </div>
                         </div>
+                        <div class="small text-muted mt-2" id="queueInfo" style="display:none;"></div>
                     </div>
 
                     <!-- 标签输入区域 -->
@@ -76,6 +77,17 @@
                     <div class="actions-section">
                         <button class="btn btn-primary w-100 mb-2" id="segmentBtn" disabled>
                             <i class="fas fa-play"></i> 开始分割
+                        </button>
+                        <div class="d-flex gap-2 mb-2">
+                            <button class="btn btn-outline-secondary flex-fill" id="prevBtn" disabled>
+                                <i class="fas fa-arrow-left"></i> 上一张
+                            </button>
+                            <button class="btn btn-outline-secondary flex-fill" id="nextBtn" disabled>
+                                下一张 <i class="fas fa-arrow-right"></i>
+                            </button>
+                        </div>
+                        <button class="btn btn-outline-success w-100 mb-2" id="batchBtn" disabled>
+                            <i class="fas fa-layer-group"></i> 批量分割（对队列中所有图片）
                         </button>
                         <button class="btn btn-outline-primary w-100 mb-2" id="annotateToggleBtn">
                             <i class="fas fa-draw-polygon"></i> 手动标注模式
@@ -191,9 +203,10 @@
                     <div class="mb-3">
                         <h6 class="text-primary">基础操作</h6>
                         <ul class="mb-0">
-                            <li>上传图片：点击或拖拽图片到左侧“上传图片”。</li>
+                            <li>上传图片：拖拽图片/点击或拖拽文件夹到左侧“上传图片”。支持多选与文件夹导入。</li>
                             <li>输入/选择标签后点击“开始分割”。</li>
-                            <li>结果列表中可选择目标、修改标签或删除目标。</li>
+                            <li>上一张/下一张：在已导入图片队列中切换当前图片。</li>
+                            <li>批量分割：对队列中所有图片逐一分割。</li>
                         </ul>
                     </div>
                     <div class="mb-3">

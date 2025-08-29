@@ -7,6 +7,11 @@ let isDraggingVertex = false;      // 是否在拖拽多边形顶点
 let draggingVertexIndex = -1;      // 被拖拽的顶点索引
 let lastResultImageBase64 = null;  // 最近一次结果图像（用于重绘）
 
+// 多图队列
+let imageQueue = []; // [{ name, file, dataURL (lazy) }]
+let currentImageIndex = -1;
+let perImageResults = new Map(); // key: index, value: { detections, resultImageBase64 }
+
 // 视图变换（缩放/平移）
 let viewScale = 1;
 let viewOffsetX = 0;
@@ -45,6 +50,10 @@ const errorModal = new bootstrap.Modal(document.getElementById('errorModal'));
 const annotateToggleBtn = document.getElementById('annotateToggleBtn');
 const helpBtn = document.getElementById('helpBtn');
 const helpModal = new bootstrap.Modal(document.getElementById('helpModal'));
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const batchBtn = document.getElementById('batchBtn');
+const queueInfo = document.getElementById('queueInfo');
 
 // 手动标注状态
 let isAnnotating = false;
@@ -82,6 +91,36 @@ function generateRandomColor() {
         '#F8C471', '#82E0AA', '#F1948A', '#85C1E9', '#D7BDE2'
     ];
     return colors[Math.floor(Math.random() * colors.length)];
+}
+
+// 批量分割：依次对队列中所有图片执行分割
+async function runBatchSegmentation() {
+    if (imageQueue.length <= 1) return;
+    const startIndex = currentImageIndex >= 0 ? currentImageIndex : 0;
+    showLoading(true);
+    try {
+        for (let i = 0; i < imageQueue.length; i++) {
+            const idx = i; // 顺序处理
+            navigateTo(idx);
+            // 确保已加载dataURL
+            await new Promise(resolve => {
+                if (imageQueue[idx].dataURL) return resolve();
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imageQueue[idx].dataURL = e.target.result;
+                    resolve();
+                };
+                reader.readAsDataURL(imageQueue[idx].file);
+            });
+            currentImage = imageQueue[idx].dataURL;
+            await performSegmentation();
+        }
+    } catch (err) {
+        showError('批量分割失败：' + (err?.message || err));
+    } finally {
+        showLoading(false);
+        navigateTo(startIndex);
+    }
 }
 
 // 预填充目标标签列表
@@ -161,6 +200,9 @@ function initializeEventListeners() {
     // 操作按钮
     segmentBtn.addEventListener('click', performSegmentation);
     clearBtn.addEventListener('click', clearResults);
+    if (prevBtn) prevBtn.addEventListener('click', () => navigateTo(currentImageIndex - 1));
+    if (nextBtn) nextBtn.addEventListener('click', () => navigateTo(currentImageIndex + 1));
+    if (batchBtn) batchBtn.addEventListener('click', runBatchSegmentation);
 
     // 手动标注开关
     if (annotateToggleBtn) {
@@ -187,32 +229,95 @@ function handleDrop(e) {
     e.preventDefault();
     uploadArea.classList.remove('dragover');
 
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-        const file = files[0];
-        if (file.type.startsWith('image/')) {
-            loadImage(file);
-        }
+    const files = Array.from(e.dataTransfer.files || []);
+    const imageFiles = files.filter(f => f.type && f.type.startsWith('image/'));
+    if (imageFiles.length > 1) {
+        setImageQueue(imageFiles);
+    } else if (imageFiles.length === 1) {
+        setImageQueue(imageFiles);
+    } else {
+        showError('未检测到图片文件');
     }
 }
 
 // 图片选择处理
 function handleImageSelect(e) {
-    const file = e.target.files[0];
-    if (file) {
-        loadImage(file);
-    }
+    const files = Array.from(e.target.files || []);
+    const imageFiles = files.filter(f => f.type && f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+    setImageQueue(imageFiles);
 }
 
 // 加载图片
-function loadImage(file) {
+function loadImageFromQueue(index) {
+    const item = imageQueue[index];
+    if (!item) return;
+    if (item.dataURL) {
+        currentImage = item.dataURL;
+        displayImage(currentImage);
+        restoreResultsForIndex(index);
+        updateSegmentButton();
+        return;
+    }
     const reader = new FileReader();
     reader.onload = (e) => {
-        currentImage = e.target.result;
+        item.dataURL = e.target.result;
+        currentImage = item.dataURL;
         displayImage(currentImage);
+        restoreResultsForIndex(index);
         updateSegmentButton();
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(item.file);
+}
+
+function setImageQueue(files) {
+    imageQueue = files.map(f => ({ name: f.name, file: f, dataURL: null }));
+    currentImageIndex = 0;
+    perImageResults.clear();
+    updateQueueInfo();
+    updateNavButtons();
+    loadImageFromQueue(currentImageIndex);
+}
+
+function navigateTo(index) {
+    if (index < 0 || index >= imageQueue.length) return;
+    currentImageIndex = index;
+    loadImageFromQueue(currentImageIndex);
+    updateQueueInfo();
+    updateNavButtons();
+}
+
+function updateQueueInfo() {
+    if (!queueInfo) return;
+    if (imageQueue.length <= 1) {
+        queueInfo.style.display = 'none';
+        queueInfo.textContent = '';
+    } else {
+        queueInfo.style.display = '';
+        queueInfo.textContent = `已导入 ${imageQueue.length} 张，当前 ${currentImageIndex + 1}/${imageQueue.length}：${imageQueue[currentImageIndex]?.name || ''}`;
+    }
+}
+
+function updateNavButtons() {
+    const hasQueue = imageQueue.length > 0;
+    if (prevBtn) prevBtn.disabled = !(hasQueue && currentImageIndex > 0);
+    if (nextBtn) nextBtn.disabled = !(hasQueue && currentImageIndex < imageQueue.length - 1);
+    if (batchBtn) batchBtn.disabled = imageQueue.length <= 1;
+}
+
+function restoreResultsForIndex(index) {
+    // 切换图片时，恢复该图片的分割结果（若存在）
+    const saved = perImageResults.get(index);
+    detectionResults = [];
+    selectedDetectionIndex = null;
+    lastResultImageBase64 = null;
+    baseRenderReady = false;
+    resultsSection.style.display = 'none';
+    detectionsList.innerHTML = '';
+    if (saved) {
+        detectionResults = JSON.parse(JSON.stringify(saved.detections || []));
+        displayResults(saved.resultImageBase64 || null, detectionResults);
+    }
 }
 
 // 显示图片
@@ -262,6 +367,7 @@ function updateLabelsDisplay() {
 // 更新分割按钮状态
 function updateSegmentButton() {
     segmentBtn.disabled = !currentImage || currentLabels.length === 0;
+    updateNavButtons();
 }
 
 // 执行分割
@@ -307,6 +413,14 @@ async function performSegmentation() {
         if (data.success) {
             detectionResults = data.detections;
             displayResults(data.image, data.detections);
+            // 保存当前图片的结果
+            if (currentImageIndex >= 0) {
+                perImageResults.set(currentImageIndex, {
+                    detections: JSON.parse(JSON.stringify(detectionResults)),
+                    resultImageBase64: data.image
+                });
+                updateQueueInfo();
+            }
         } else {
             showError(data.error || '分割失败');
         }
