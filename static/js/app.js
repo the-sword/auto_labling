@@ -104,6 +104,12 @@ const PREDEFINED_LABELS = [
     'background'
 ];
 
+// 规范化标签显示：去掉末尾句点（中英文）并去除首尾空白
+function sanitizeLabel(label) {
+    if (typeof label !== 'string') return label;
+    return label.trim().replace(/[。．.]+$/u, '');
+}
+
 // 颜色生成函数
 function generateRandomColor() {
     const colors = [
@@ -373,7 +379,7 @@ function displayImage(imageSrc) {
 
 // 标签管理
 function addLabel() {
-    const label = labelInput.value.trim();
+    const label = sanitizeLabel(labelInput.value.trim());
     if (label && !currentLabels.includes(label)) {
         addLabelToArray(label);
         updateLabelsDisplay();
@@ -652,7 +658,7 @@ function displayDetectionsList(detections) {
         detectionItem.innerHTML = `
             <div class="d-flex justify-content-between align-items-start">
               <div class="detection-info" style="cursor: pointer;">
-                  <div class="detection-label" data-index="${index}">${detection.label}</div>
+                  <div class="detection-label" data-index="${index}">${sanitizeLabel(detection.label)}</div>
                   <div class="detection-score">置信度: ${(detection.score * 100).toFixed(1)}%</div>
                   <div class="detection-box text-muted small">
                     [${detection.box.xmin}, ${detection.box.ymin}, ${detection.box.xmax}, ${detection.box.ymax}]
@@ -1203,7 +1209,7 @@ function editLabelInline(index) {
     input.focus();
     const commit = () => {
         const v = input.value.trim();
-        if (v) detectionResults[index].label = v;
+        if (v) detectionResults[index].label = sanitizeLabel(v);
         displayDetectionsList(detectionResults);
         // 标签变更影响底图文字，重建底图
         baseRenderReady = false;
