@@ -84,7 +84,7 @@ function handleDragLeave(e) {
 function handleDrop(e) {
     e.preventDefault();
     uploadArea.classList.remove('dragover');
-    
+
     const files = e.dataTransfer.files;
     if (files.length > 0) {
         const file = files[0];
@@ -201,13 +201,13 @@ async function performSegmentation() {
 function displayResults(imageSrc, detections) {
     // 显示原图
     originalImage.src = `data:image/png;base64,${imageSrc}`;
-    
+
     // 绘制分割结果
     drawSegmentationResult(imageSrc, detections);
-    
+
     // 显示检测结果列表
     displayDetectionsList(detections);
-    
+
     // 显示结果区域
     resultsSection.style.display = 'block';
     resultsSection.scrollIntoView({ behavior: 'smooth' });
@@ -232,9 +232,12 @@ async function drawSegmentationResult(imageSrc, detections) {
         ctx.drawImage(mainImage, 0, 0);
 
         for (const detection of detections) {
+            //print
+            console.log(detection);
+
             if (detection.mask) {
                 const maskImage = await loadImage(`data:image/png;base64,${detection.mask}`);
-                
+
                 const tempCanvas = document.createElement('canvas');
                 const tempCtx = tempCanvas.getContext('2d');
                 tempCanvas.width = mainImage.width;
@@ -246,11 +249,15 @@ async function drawSegmentationResult(imageSrc, detections) {
                 const colorRgb = hexToRgb(colorHex);
 
                 for (let i = 0; i < maskData.data.length; i += 4) {
-                    if (maskData.data[i] > 0) {
+                    const isMask = maskData.data[i] > 0; // red channel > 0
+                    if (isMask) {
                         maskData.data[i] = colorRgb.r;
                         maskData.data[i + 1] = colorRgb.g;
                         maskData.data[i + 2] = colorRgb.b;
-                        maskData.data[i + 3] = 128; // Alpha
+                        maskData.data[i + 3] = 128; // semi-transparent for mask
+                    } else {
+                        // Make background fully transparent
+                        maskData.data[i + 3] = 0;
                     }
                 }
                 tempCtx.putImageData(maskData, 0, 0);
@@ -262,7 +269,7 @@ async function drawSegmentationResult(imageSrc, detections) {
                 ctx.strokeStyle = colorHex;
                 ctx.lineWidth = 2;
                 ctx.strokeRect(box.xmin, box.ymin, box.xmax - box.xmin, box.ymax - box.ymin);
-                
+
                 ctx.fillStyle = colorHex;
                 ctx.font = '14px Arial';
                 ctx.fillText(`${detection.label}: ${detection.score.toFixed(2)}`, box.xmin, box.ymin - 5);
@@ -277,7 +284,7 @@ async function drawSegmentationResult(imageSrc, detections) {
 // 显示检测结果列表
 function displayDetectionsList(detections) {
     detectionsList.innerHTML = '';
-    
+
     detections.forEach((detection, index) => {
         const detectionItem = document.createElement('div');
         detectionItem.className = 'detection-item fade-in';
@@ -299,7 +306,7 @@ function clearResults() {
     currentImage = null;
     currentLabels = [];
     detectionResults = [];
-    
+
     imageContainer.innerHTML = `
         <div class="placeholder-text">
             <i class="fas fa-image fa-4x mb-3"></i>
@@ -307,7 +314,7 @@ function clearResults() {
             <p class="text-muted">支持JPG、PNG等常见图片格式</p>
         </div>
     `;
-    
+
     labelsList.innerHTML = '';
     resultsSection.style.display = 'none';
     updateSegmentButton();

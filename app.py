@@ -3,6 +3,8 @@ import base64
 import io
 import json
 import random
+import signal
+import sys
 from dataclasses import dataclass, asdict
 from typing import Any, List, Dict, Optional, Union, Tuple
 
@@ -55,22 +57,22 @@ def mask_to_polygon(mask: np.ndarray) -> List[List[int]]:
     """将mask转换为多边形坐标"""
     if mask is None:
         return []
-    
+
     contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return []
-    
+
     largest_contour = max(contours, key=cv2.contourArea)
     polygon = largest_contour.reshape(-1, 2).tolist()
     return polygon
 
-def get_boxes(results: List[DetectionResult]) -> List[List[List[float]]]:
+def get_boxes(results: List[DetectionResult]) -> List[List[float]]:
     """提取边界框坐标"""
     boxes = []
     for result in results:
         xyxy = result.box.xyxy
         boxes.append(xyxy)
-    return [boxes]
+    return boxes
 
 def refine_masks(masks: torch.BoolTensor, polygon_refinement: bool = False) -> List[np.ndarray]:
     """优化mask"""
@@ -106,13 +108,13 @@ def load_image(image_data: bytes) -> Image.Image:
 def detect(image: Image.Image, labels: List[str], threshold: float = 0.3) -> List[DetectionResult]:
     """使用Grounding DINO检测对象"""
     global object_detector
-    
+
     if object_detector is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models/grounding-dino-tiny")
         object_detector = pipeline(
-            model=model_path, 
-            task="zero-shot-object-detection", 
+            model=model_path,
+            task="zero-shot-object-detection",
             device=device,
             local_files_only=True
         )
@@ -125,9 +127,10 @@ def detect(image: Image.Image, labels: List[str], threshold: float = 0.3) -> Lis
 def segment(image: Image.Image, detection_results: List[DetectionResult], polygon_refinement: bool = False) -> List[DetectionResult]:
     """使用SAM生成分割mask"""
     global segmentator, processor
-    
+
     if segmentator is None or processor is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Device set to use {device}")
         sam_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models/sam-vit-base")
         segmentator = AutoModelForMaskGeneration.from_pretrained(sam_path, local_files_only=True).to(device)
         processor = AutoProcessor.from_pretrained(sam_path, local_files_only=True)
@@ -136,11 +139,12 @@ def segment(image: Image.Image, detection_results: List[DetectionResult], polygo
         return detection_results
 
     boxes = get_boxes(detection_results)
-    inputs = processor(images=image, input_boxes=boxes, return_tensors="pt").to(segmentator.device)
-
+    print(f"boxes: {boxes}")
+    inputs = processor(images=image, input_boxes=[boxes], return_tensors="pt").to(segmentator.device)
+    print(f"inputs: {inputs}")
     with torch.no_grad():
         outputs = segmentator(**inputs)
-    
+
     masks = processor.post_process_masks(
         masks=outputs.pred_masks,
         original_sizes=inputs.original_sizes,
@@ -159,6 +163,7 @@ def grounded_segmentation(image_data: bytes, labels: List[str], threshold: float
     image = load_image(image_data)
     detections = detect(image, labels, threshold)
     detections = segment(image, detections, polygon_refinement)
+    print(f"detections: {detections}")
     return np.array(image), detections
 
 def detection_result_to_dict(detection: DetectionResult) -> Dict:
@@ -173,7 +178,7 @@ def detection_result_to_dict(detection: DetectionResult) -> Dict:
             'ymax': detection.box.ymax
         }
     }
-    
+
     if detection.mask is not None:
         # 将mask转换为base64编码
         mask_pil = Image.fromarray(detection.mask.astype(np.uint8) * 255)
@@ -181,11 +186,11 @@ def detection_result_to_dict(detection: DetectionResult) -> Dict:
         mask_pil.save(buffer, format='PNG')
         mask_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
         result['mask'] = mask_base64
-        
+
         # 添加多边形坐标
         polygon = mask_to_polygon(detection.mask)
         result['polygon'] = polygon
-    
+
     return result
 
 @app.route('/')
@@ -203,27 +208,27 @@ def segment_api():
         labels = data['labels']
         threshold = data.get('threshold', 0.3)
         polygon_refinement = data.get('polygon_refinement', True)
-        
+
         # 执行分割
         image_array, detections = grounded_segmentation(
             image_data, labels, threshold, polygon_refinement
         )
-        
+
         # 转换结果为JSON格式
         results = [detection_result_to_dict(detection) for detection in detections]
-        
+
         # 将原图转换为base64
         image_pil = Image.fromarray(image_array)
         buffer = io.BytesIO()
         image_pil.save(buffer, format='PNG')
         image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
+
         return jsonify({
             'success': True,
             'image': image_base64,
             'detections': results
         })
-        
+
     except Exception as e:
         return jsonify({
             'success': False,
@@ -235,5 +240,28 @@ def health_check():
     """健康检查端点"""
     return jsonify({'status': 'healthy'})
 
+def signal_handler(sig, frame):
+    """处理终止信号，确保应用程序正确关闭"""
+    print('\n正在关闭应用程序...')
+    # 释放资源
+    global object_detector, segmentator, processor
+    object_detector = None
+    segmentator = None
+    processor = None
+    # 强制清理GPU内存
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    sys.exit(0)
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # 注册信号处理函数
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
+    except KeyboardInterrupt:
+        print('\n接收到键盘中断，正在关闭...')
+        # 确保资源被释放
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
