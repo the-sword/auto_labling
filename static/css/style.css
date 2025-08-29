@@ -173,12 +173,29 @@ body {
     border-radius: 8px;
     overflow: hidden;
     background: #f8f9fa;
+    position: relative;
+    min-height: 360px; /* 为占位符预留空间 */
 }
 
 .result-image {
     width: 100%;
     height: auto;
     display: block;
+}
+
+/* 原图占位符 */
+.result-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: #666;
+}
+
+.result-placeholder .placeholder-text i {
+    color: #cfd4da;
 }
 
 /* 检测结果列表样式 */

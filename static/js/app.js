@@ -64,6 +64,7 @@ const segmentBtn = document.getElementById('segmentBtn');
 const clearBtn = document.getElementById('clearBtn');
 const resultsSection = document.getElementById('resultsSection');
 const originalImage = document.getElementById('originalImage');
+const originalPlaceholder = document.getElementById('originalPlaceholder');
 const resultCanvas = document.getElementById('resultCanvas');
 const detectionsList = document.getElementById('detectionsList');
 const loadingOverlay = document.getElementById('loadingOverlay');
@@ -374,7 +375,9 @@ function displayImage(imageSrc) {
     // 直接显示到顶部的原图区域
     if (originalImage) {
         originalImage.src = imageSrc;
+        originalImage.style.display = '';
     }
+    if (originalPlaceholder) originalPlaceholder.style.display = 'none';
 }
 
 // 标签管理
@@ -484,6 +487,8 @@ async function performSegmentation() {
 function displayResults(imageSrc, detections) {
     // 显示原图
     originalImage.src = `data:image/png;base64,${imageSrc}`;
+    originalImage.style.display = '';
+    if (originalPlaceholder) originalPlaceholder.style.display = 'none';
 
     // 绘制分割结果
     lastResultImageBase64 = imageSrc;
@@ -720,7 +725,11 @@ function clearResults() {
     isDraggingVertex = false;
 
     // 清空顶部原图与结果画布
-    if (originalImage) originalImage.removeAttribute('src');
+    if (originalImage) {
+        originalImage.removeAttribute('src');
+        originalImage.style.display = 'none';
+    }
+    if (originalPlaceholder) originalPlaceholder.style.display = '';
     if (resultCanvas) {
         const ctx = resultCanvas.getContext('2d');
         ctx && ctx.clearRect(0, 0, resultCanvas.width || 0, resultCanvas.height || 0);
