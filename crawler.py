@@ -87,6 +87,55 @@ def _bing_search(query: str, count: int) -> List[str]:
     return imgs[:count]
 
 
+def _google_search(query: str, count: int) -> List[str]:
+    """Lightweight Google Images scrape (public results).
+    Note: Google may change markup frequently and apply rate-limits. This is best-effort only.
+    """
+    q = requests.utils.quote(query)
+    # Use images vertical (tbm=isch). hl to stabilize markup; safe=off for raw results
+    url = f"https://www.google.com/search?tbm=isch&q={q}&hl=en&safe=off"
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+    except Exception:
+        return []
+
+    soup = BeautifulSoup(resp.text, "lxml")
+    imgs: List[str] = []
+
+    # Primary: grid images under #islrg img (avoid base64 data thumbnails)
+    for img in soup.select("#islrg img"):
+        src = img.get("data-src") or img.get("src")
+        if not src:
+            continue
+        if src.startswith("http") and not src.startswith("https://encrypted-tbn0.gstatic.com"):
+            imgs.append(src)
+        # Accept gstatic (thumbnail) only if nothing else is available later
+        if len(imgs) >= count:
+            break
+
+    # Fallback: any <img> in page with http URL (skip data URIs)
+    if len(imgs) < count:
+        for img in soup.select("img"):
+            src = img.get("data-src") or img.get("src")
+            if not src:
+                continue
+            if src.startswith("http") and not src.startswith("data:"):
+                imgs.append(src)
+            if len(imgs) >= count:
+                break
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for u in imgs:
+        if u not in seen:
+            seen.add(u)
+            unique.append(u)
+        if len(unique) >= count:
+            break
+    return unique[:count]
+
 essential_headers = {
     "Referer": "https://image.baidu.com/",
     "User-Agent": USER_AGENT,
@@ -118,7 +167,7 @@ def _baidu_search(query: str, count: int) -> List[str]:
 SUPPORTED_ENGINES = {
     "bing": _bing_search,
     "baidu": _baidu_search,
-    # "google": ...  # Google often requires additional measures; omitted for now.
+    "google": _google_search,
 }
 
 
