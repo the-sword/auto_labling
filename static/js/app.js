@@ -7,6 +7,12 @@ let isDraggingVertex = false;      // 是否在拖拽多边形顶点
 let draggingVertexIndex = -1;      // 被拖拽的顶点索引
 let lastResultImageBase64 = null;  // 最近一次结果图像（用于重绘）
 let hoveredDetectionIndex = null;  // 悬浮的分割结果索引（用于联动高亮）
+let folderConfig = {               // 文件夹配置
+    upload_folder: '',
+    results_folder: '',
+    default_upload_folder: '',
+    default_results_folder: ''
+};
 
 // 功能开关：检测列表与画布的悬浮联动
 const ENABLE_HOVER_LINK = false;
@@ -327,8 +333,16 @@ function renderExampleTags() {
 
 // 初始化事件监听器
 function initializeEventListeners() {
-    // 图片上传
-    uploadArea.addEventListener('click', () => imageInput.click());
+    // 文件夹配置按钮点击事件
+    document.getElementById('configFoldersBtnInline').addEventListener('click', function() {
+        const modal = new bootstrap.Modal(document.getElementById('folderConfigModal'));
+        modal.show();
+    });
+    
+    // 上传区域点击事件
+    document.getElementById('uploadArea').addEventListener('click', function() {
+        document.getElementById('imageInput').click();
+    });
     uploadArea.addEventListener('dragover', handleDragOver);
     uploadArea.addEventListener('dragleave', handleDragLeave);
     uploadArea.addEventListener('drop', handleDrop);
@@ -1073,6 +1087,10 @@ function showError(message) {
     errorModal.show();
 }
 
+function showSuccess(message) {
+    alert(message); // 简单使用alert显示成功消息
+}
+
 // ============ 交互与编辑 ============
 function enableCanvasInteractions() {
     const canvas = resultCanvas;
@@ -1625,12 +1643,88 @@ function cleanupLocalStorage() {
     }
 }
 
-// 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', () => {
+// 获取文件夹配置
+async function getFolderConfig() {
+    try {
+        const response = await fetch('/api/config/folders');
+        const data = await response.json();
+        if (data.success && data.folders) {
+            folderConfig = data.folders;
+            return data.folders;
+        }
+        return null;
+    } catch (error) {
+        console.error('获取文件夹配置失败:', error);
+        return null;
+    }
+}
+
+// 设置文件夹配置
+async function setFolderConfig(uploadFolder, resultsFolder) {
+    try {
+        const response = await fetch('/api/config/folders', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                upload_folder: uploadFolder,
+                results_folder: resultsFolder
+            })
+        });
+        const data = await response.json();
+        if (data.success && data.folders) {
+            folderConfig = data.folders;
+            showSuccess('文件夹配置已更新');
+            return data.folders;
+        }
+        showError('更新文件夹配置失败');
+        return null;
+    } catch (error) {
+        console.error('设置文件夹配置失败:', error);
+        showError('设置文件夹配置失败: ' + error.message);
+        return null;
+    }
+}
+
+// 初始化文件夹配置对话框
+function initFolderConfigModal() {
+    const modal = document.getElementById('folderConfigModal');
+    const uploadInput = document.getElementById('uploadFolderInput');
+    const resultsInput = document.getElementById('resultsFolderInput');
+    const saveBtn = document.getElementById('saveFolderConfigBtn');
+    
+    // 打开对话框时填充当前配置
+    modal.addEventListener('show.bs.modal', function() {
+        uploadInput.value = folderConfig.upload_folder || '';
+        resultsInput.value = folderConfig.results_folder || '';
+    });
+    
+    // 保存按钮点击事件
+    saveBtn.addEventListener('click', async function() {
+        const uploadFolder = uploadInput.value.trim();
+        const resultsFolder = resultsInput.value.trim();
+        
+        await setFolderConfig(uploadFolder, resultsFolder);
+        
+        // 关闭对话框
+        const bsModal = bootstrap.Modal.getInstance(modal);
+        bsModal.hide();
+    });
+}
+
+// 页面加载完成后执行
+document.addEventListener('DOMContentLoaded', async function() {
     // 先渲染示例标签，再绑定事件
     renderExampleTags();
     // 预填充目标标签列表
     prefillTargetLabels();
     initializeEventListeners();
     updateSegmentButton();
+    
+    // 获取文件夹配置
+    await getFolderConfig();
+    
+    // 初始化文件夹配置对话框
+    initFolderConfigModal();
 });

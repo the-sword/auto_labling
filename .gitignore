@@ -120,6 +120,6 @@ models/
 .DS_Store
 Thumbs.db
 
-uploads/
-results/
+uploads*/
+results*/
 isp_left_230764.json

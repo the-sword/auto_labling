@@ -144,9 +144,10 @@
                                 下一张 <i class="fas fa-arrow-right"></i>
                             </button>
                         </div>
-                        <div class="input-group" style="max-width: 320px;">
-                            <span class="input-group-text"><i class="fas fa-folder-open"></i></span>
-                            <input type="text" class="form-control" id="saveSubdirInput" placeholder="保存子目录（可选）">
+                        <div class="d-grid" style="max-width: 320px;">
+                            <button class="btn btn-outline-secondary" id="configFoldersBtnInline">
+                                <i class="fas fa-folder-open"></i> 设置保存文件夹
+                            </button>
                         </div>
                         <button class="btn btn-success" id="saveBtn" disabled>
                             <i class="fas fa-save"></i> 保存结果
@@ -269,6 +270,51 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 文件夹配置对话框 -->
+    <div class="modal fade" id="folderConfigModal" tabindex="-1" aria-labelledby="folderConfigModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="folderConfigModalLabel"><i class="fas fa-folder-open"></i> 文件夹设置</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="folderConfigForm">
+                        <div class="mb-3">
+                            <label for="uploadFolderInput" class="form-label">上传文件夹路径</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="fas fa-upload"></i></span>
+                                <input type="text" class="form-control" id="uploadFolderInput" placeholder="绝对路径或相对于应用根目录的路径">
+                            </div>
+                            <div class="form-text">默认: uploads/</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="resultsFolderInput" class="form-label">结果保存文件夹路径</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="fas fa-save"></i></span>
+                                <input type="text" class="form-control" id="resultsFolderInput" placeholder="绝对路径或相对于应用根目录的路径">
+                            </div>
+                            <div class="form-text">默认: results/</div>
+                        </div>
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> 提示：
+                            <ul class="mb-0">
+                                <li>可以使用绝对路径（如 /home/user/data）</li>
+                                <li>或相对路径（如 my_uploads）</li>
+                                <li>路径将自动创建（如果不存在）</li>
+                                <li>更改路径后，之前的文件仍然存在于原位置</li>
+                            </ul>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="saveFolderConfigBtn">保存设置</button>
                 </div>
             </div>
         </div>

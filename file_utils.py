@@ -14,10 +14,64 @@ from typing import List, Dict, Any, Optional, Union, Tuple
 
 # 常量定义
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-RESULTS_FOLDER = os.path.join(BASE_DIR, 'results')
+
+# 默认文件夹配置
+DEFAULT_UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+DEFAULT_RESULTS_FOLDER = os.path.join(BASE_DIR, 'results')
+
+# 实际使用的文件夹路径
+UPLOAD_FOLDER = DEFAULT_UPLOAD_FOLDER
+RESULTS_FOLDER = DEFAULT_RESULTS_FOLDER
+
+# 初始化默认目录
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULTS_FOLDER, exist_ok=True)
+
+def configure_folders(upload_folder=None, results_folder=None):
+    """
+    配置上传和结果文件夹路径
+    
+    Args:
+        upload_folder: 自定义上传文件夹路径，如果为None则使用默认值
+        results_folder: 自定义结果文件夹路径，如果为None则使用默认值
+    
+    Returns:
+        Dict: 包含配置结果的字典
+    """
+    global UPLOAD_FOLDER, RESULTS_FOLDER
+    
+    # 如果提供了自定义上传文件夹路径
+    if upload_folder:
+        # 规范化路径并创建目录
+        upload_folder = os.path.abspath(upload_folder)
+        os.makedirs(upload_folder, exist_ok=True)
+        UPLOAD_FOLDER = upload_folder
+    
+    # 如果提供了自定义结果文件夹路径
+    if results_folder:
+        # 规范化路径并创建目录
+        results_folder = os.path.abspath(results_folder)
+        os.makedirs(results_folder, exist_ok=True)
+        RESULTS_FOLDER = results_folder
+    
+    return {
+        'upload_folder': UPLOAD_FOLDER,
+        'results_folder': RESULTS_FOLDER
+    }
+
+def get_current_folders():
+    """
+    获取当前使用的文件夹路径
+    
+    Returns:
+        Dict: 包含当前文件夹路径的字典
+    """
+    return {
+        'upload_folder': UPLOAD_FOLDER,
+        'results_folder': RESULTS_FOLDER,
+        'default_upload_folder': DEFAULT_UPLOAD_FOLDER,
+        'default_results_folder': DEFAULT_RESULTS_FOLDER
+    }
 
 def simplify_polygon(points: List[List[int]], epsilon: float = 2.0, collinear_eps: float = 1.0) -> List[List[int]]:
     """简化多边形点集：

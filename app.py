@@ -30,12 +30,12 @@ object_detector = None
 segmentator = None
 processor = None
 
-# 持久化目录
+# 使用file_utils中的文件夹配置
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-RESULTS_FOLDER = os.path.join(BASE_DIR, 'results')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(RESULTS_FOLDER, exist_ok=True)
+# 获取文件夹路径
+folders = file_utils.get_current_folders()
+UPLOAD_FOLDER = folders['upload_folder']
+RESULTS_FOLDER = folders['results_folder']
 
 @dataclass
 class BoundingBox:
@@ -447,6 +447,48 @@ def segment_api():
 def health_check():
     """健康检查端点"""
     return jsonify({'status': 'healthy'})
+
+@app.route('/api/config/folders', methods=['GET', 'POST'])
+def config_folders_api():
+    """获取或设置文件夹配置
+    
+    GET: 获取当前文件夹配置
+    POST: 设置新的文件夹配置
+    """
+    global UPLOAD_FOLDER, RESULTS_FOLDER
+    
+    if request.method == 'GET':
+        # 返回当前配置
+        folders = file_utils.get_current_folders()
+        return jsonify({
+            'success': True,
+            'folders': folders
+        })
+    else:
+        # 设置新配置
+        data = request.get_json()
+        upload_folder = data.get('upload_folder')
+        results_folder = data.get('results_folder')
+        
+        # 验证路径安全性
+        if upload_folder and not os.path.isabs(upload_folder):
+            upload_folder = os.path.join(BASE_DIR, upload_folder)
+        
+        if results_folder and not os.path.isabs(results_folder):
+            results_folder = os.path.join(BASE_DIR, results_folder)
+            
+        # 配置文件夹
+        result = file_utils.configure_folders(upload_folder, results_folder)
+        
+        # 更新全局变量
+        UPLOAD_FOLDER = result['upload_folder']
+        RESULTS_FOLDER = result['results_folder']
+        
+        return jsonify({
+            'success': True,
+            'message': '文件夹配置已更新',
+            'folders': result
+        })
 
 @app.route('/api/upload', methods=['POST'])
 def upload_api():
