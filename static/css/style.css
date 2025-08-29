@@ -72,17 +72,21 @@ body {
 .labels-list {
     max-height: 150px;
     overflow-y: auto;
+    /* 多行布局，紧凑显示 */
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .label-item {
-    display: flex;
-    justify-content: space-between;
+    display: inline-flex;
     align-items: center;
     background: #f8f9fa;
-    padding: 8px 12px;
-    margin-bottom: 5px;
-    border-radius: 20px;
+    padding: 6px 10px;
+    margin: 0; /* 交给父容器gap控制间距 */
+    border-radius: 18px;
     border: 1px solid #e9ecef;
+    column-gap: 8px;
 }
 
 .label-item .badge {
