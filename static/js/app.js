@@ -35,6 +35,8 @@ function initCrawlPage() {
     if (startBtn.dataset.bound === '1') return; // 防止重复绑定
     startBtn.dataset.bound = '1';
 
+    let currentStream = null; // EventSource 实例
+
     const setRunning = (running) => {
         if (running) {
             startBtn.disabled = true;
@@ -74,44 +76,61 @@ function initCrawlPage() {
         const engine = (engineSelect && engineSelect.value) || 'bing';
         const limit = parseInt((limitInput && limitInput.value) || '30', 10);
         const outDir = ((outDirInput && outDirInput.value) || '').trim();
-        console.log('[crawl] start clicked', { query, engine, limit, outDir });
+        
         if (!query) {
             showError('请输入关键词');
             return;
         }
-        setRunning(true);
-        if (statusBox) statusBox.textContent = '进行中…';
-
-        try {
-            const resp = await fetch('/api/crawl', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    query,
-                    engine,
-                    limit,
-                    out_dir: outDir
-                })
-            });
-            const data = await resp.json();
-            if (!data.success) {
-                showError(data.error || '爬取失败');
-                return;
-            }
-            const stoppedMsg = data.stopped ? '（已停止）' : '';
-            const msg = `已保存 ${data.saved_count}/${data.found} 张至: ${data.out_dir_rel || data.out_dir} ${stoppedMsg}`.trim();
-            if (statusBox) statusBox.textContent = msg;
-            showSuccess(data.stopped ? '已停止' : '爬取完成');
-
-            // 渲染瀑布流
-            if (gallery) {
-                renderCrawlGallery(gallery, data.saved || [], /*replace*/ true);
-            }
-        } catch (e) {
-            showError('网络错误：' + (e?.message || e));
-        } finally {
-            setRunning(false);
+        // 若已有流，先关闭
+        if (currentStream) {
+            try { currentStream.close(); } catch (e) {}
+            currentStream = null;
         }
+        if (gallery) gallery.innerHTML = '';
+        setRunning(true);
+        if (statusBox) statusBox.textContent = '开始抓取…';
+
+        // 通过 SSE 边爬边推送
+        const params = new URLSearchParams({ query, engine, limit: String(limit) });
+        if (outDir) params.set('out_dir', outDir);
+        const url = '/api/crawl/stream?' + params.toString();
+        const es = new EventSource(url);
+        currentStream = es;
+        let savedCount = 0;
+        let totalFound = 0; // 由 done 事件提供
+
+        es.addEventListener('saved', (ev) => {
+            try {
+                const data = JSON.parse(ev.data || '{}');
+                savedCount += 1;
+                if (statusBox) statusBox.textContent = `已保存 ${savedCount} 张…`;
+                if (gallery) renderCrawlGallery(gallery, [data], /*replace*/ false);
+            } catch (e) {
+                console.error(e);
+            }
+        });
+
+        es.addEventListener('done', (ev) => {
+            try {
+                const data = JSON.parse(ev.data || '{}');
+                totalFound = data.found || savedCount;
+                const stoppedMsg = data.stopped ? '（已停止）' : '';
+                const msg = `已保存 ${data.saved_count ?? savedCount}/${totalFound} 张至: ${data.out_dir_rel || data.out_dir || ''} ${stoppedMsg}`.trim();
+                if (statusBox) statusBox.textContent = msg;
+                showSuccess(data.stopped ? '已停止' : (data.success === false ? '爬取失败' : '爬取完成'));
+            } catch (e) {
+                console.error(e);
+            } finally {
+                setRunning(false);
+                try { es.close(); } catch (e) {}
+                currentStream = null;
+            }
+        });
+
+        es.addEventListener('error', (ev) => {
+            // 某些浏览器会自动重连，此处简单处理
+            console.warn('SSE error', ev);
+        });
     });
 }
 

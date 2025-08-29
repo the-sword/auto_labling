@@ -3,6 +3,7 @@ import base64
 import io
 import json
 import random
+import time
 import signal
 import sys
 import shutil
@@ -15,7 +16,7 @@ import requests
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
-from flask import Flask, request, jsonify, render_template, send_from_directory, url_for
+from flask import Flask, request, jsonify, render_template, send_from_directory, url_for, Response, stream_with_context
 from flask_cors import CORS
 from transformers import AutoModelForMaskGeneration, AutoProcessor, pipeline
 
@@ -515,6 +516,113 @@ def crawl_stop_api():
         return jsonify({'success': True, 'message': '已请求停止'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+def _sse_event(event: str, data: dict) -> str:
+    import json
+    return f"event: {event}\n" + "data: " + json.dumps(data, ensure_ascii=False) + "\n\n"
+
+@app.route('/api/crawl/stream', methods=['GET'])
+def crawl_stream_api():
+    """SSE: 边爬取边推送保存的图片
+    查询参数: query, engine, limit, out_dir(可选, 相对results/或绝对)
+    事件:
+      - saved: {rel, url, src_url, index}
+      - done:  {success, saved_count, found, out_dir_rel, out_dir, stopped}
+    """
+    @stream_with_context
+    def generate():
+        try:
+            engine = (request.args.get('engine') or 'bing').lower()
+            query = (request.args.get('query') or '').strip()
+            try:
+                limit = int(request.args.get('limit') or 30)
+            except Exception:
+                limit = 30
+            out_dir = (request.args.get('out_dir') or '').strip()
+
+            if not query:
+                yield _sse_event('done', {'success': False, 'error': 'query required'})
+                return
+
+            # 输出目录规范化
+            if out_dir:
+                if not os.path.isabs(out_dir):
+                    out_dir = os.path.join(RESULTS_FOLDER, out_dir)
+            else:
+                safe_query = crawler.sanitize_filename(query) or 'images'
+                out_dir = os.path.join(RESULTS_FOLDER, 'auto_crawl', safe_query)
+            os.makedirs(out_dir, exist_ok=True)
+
+            # 清除停止标记
+            crawler.clear_stop()
+
+            # 获取链接列表
+            if engine not in crawler.SUPPORTED_ENGINES:
+                yield _sse_event('done', {'success': False, 'error': f'Unsupported engine: {engine}'})
+                return
+            fetcher = crawler.SUPPORTED_ENGINES[engine]
+            urls = fetcher(query, limit)
+            if not urls:
+                yield _sse_event('done', {'success': False, 'error': 'No images found or search failed'})
+                return
+
+            saved_count = 0
+            base = crawler.sanitize_filename(query) or 'images'
+            for idx, u in enumerate(urls, start=1):
+                if crawler.STOP_EVENT.is_set():
+                    break
+                ext = os.path.splitext(u.split('?')[0])[1].lower()
+                if ext not in ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']:
+                    ext = '.jpg'
+                fname = f"{base}_{idx:04d}{ext}"
+                path = os.path.join(out_dir, fname)
+                ok = crawler._download(u, path)
+                if ok:
+                    saved_count += 1
+                    try:
+                        rel = os.path.relpath(path, RESULTS_FOLDER)
+                    except Exception:
+                        rel = path
+                    try:
+                        file_url = url_for('serve_results', filename=rel, _external=False)
+                    except Exception:
+                        file_url = ''
+                    yield _sse_event('saved', {
+                        'rel': rel,
+                        'url': file_url,
+                        'src_url': u,
+                        'index': idx,
+                    })
+                # 小延时 + 停止检查
+                for _ in range(3):
+                    if crawler.STOP_EVENT.is_set():
+                        break
+                    time.sleep(random.uniform(0.05, 0.1))
+
+            try:
+                out_dir_rel = os.path.relpath(out_dir, RESULTS_FOLDER)
+            except Exception:
+                out_dir_rel = out_dir
+            yield _sse_event('done', {
+                'success': True,
+                'engine': engine,
+                'query': query,
+                'requested': limit,
+                'found': len(urls),
+                'saved_count': saved_count,
+                'out_dir': out_dir,
+                'out_dir_rel': out_dir_rel,
+                'stopped': crawler.STOP_EVENT.is_set(),
+            })
+        except Exception as e:
+            yield _sse_event('done', {'success': False, 'error': str(e)})
+
+    headers = {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',  # 兼容某些反向代理禁用缓冲
+    }
+    return Response(generate(), headers=headers)
 
 @app.route('/api/config/folders', methods=['GET', 'POST'])
 def config_folders_api():
