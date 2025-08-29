@@ -30,6 +30,7 @@ let perImageResults = new Map(); // key: index, value: { detections, resultImage
 function initCrawlPage() {
     const startBtn = document.getElementById('crawlPageStartBtn');
     const stopBtn = document.getElementById('crawlPageStopBtn');
+    const gallery = document.getElementById('crawlGallery');
     if (!startBtn) return;
     if (startBtn.dataset.bound === '1') return; // 防止重复绑定
     startBtn.dataset.bound = '1';
@@ -101,12 +102,61 @@ function initCrawlPage() {
             const msg = `已保存 ${data.saved_count}/${data.found} 张至: ${data.out_dir_rel || data.out_dir} ${stoppedMsg}`.trim();
             if (statusBox) statusBox.textContent = msg;
             showSuccess(data.stopped ? '已停止' : '爬取完成');
+
+            // 渲染瀑布流
+            if (gallery) {
+                renderCrawlGallery(gallery, data.saved || [], /*replace*/ true);
+            }
         } catch (e) {
             showError('网络错误：' + (e?.message || e));
         } finally {
             setRunning(false);
         }
     });
+}
+
+function renderCrawlGallery(galleryEl, items, replace) {
+    if (!galleryEl) return;
+    if (replace) galleryEl.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    items.forEach((it) => {
+        const url = it.url || '';
+        const rel = it.rel || '';
+        if (!url) return;
+        const card = document.createElement('div');
+        card.className = 'masonry-item fade-in';
+        card.dataset.rel = rel;
+        card.innerHTML = `
+            <img class="masonry-img" loading="lazy" src="${url}" alt="" />
+            <div class="masonry-actions">
+                <button class="btn-delete" type="button">删除</button>
+            </div>
+        `;
+        const delBtn = card.querySelector('.btn-delete');
+        delBtn.addEventListener('click', async (ev) => {
+            ev.stopPropagation();
+            delBtn.disabled = true;
+            try {
+                const resp = await fetch('/api/crawl/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: rel })
+                });
+                const data = await resp.json();
+                if (!data.success) {
+                    showError(data.error || '删除失败');
+                    delBtn.disabled = false;
+                    return;
+                }
+                card.remove();
+            } catch (e) {
+                showError('网络错误：' + (e?.message || e));
+                delBtn.disabled = false;
+            }
+        });
+        frag.appendChild(card);
+    });
+    galleryEl.appendChild(frag);
 }
 
 // 上传图片文件到后台，更新队列条目的 serverPath/serverUrl

@@ -492,6 +492,17 @@ def crawl_api():
             rel_to_results = out_dir
         result['out_dir'] = out_dir
         result['out_dir_rel'] = rel_to_results
+        # 为每个保存的文件添加相对路径与可访问URL
+        for item in result.get('saved', []) or []:
+            try:
+                rel = os.path.relpath(item.get('path', ''), RESULTS_FOLDER)
+            except Exception:
+                rel = item.get('path', '')
+            item['rel'] = rel
+            try:
+                item['url'] = url_for('serve_results', filename=rel, _external=False)
+            except Exception:
+                item['url'] = ''
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -586,6 +597,33 @@ def upload_api():
 def serve_uploads(filename):
     """静态访问上传的文件"""
     return send_from_directory(UPLOAD_FOLDER, filename)
+
+@app.route('/results/<path:filename>')
+def serve_results(filename):
+    """静态访问 results 下的文件"""
+    return send_from_directory(RESULTS_FOLDER, filename)
+
+@app.route('/api/crawl/delete', methods=['POST'])
+def crawl_delete_api():
+    """删除 results 下的某个图片文件
+    请求JSON: { path: 相对results/的路径 }
+    """
+    try:
+        data = request.get_json() or {}
+        rel_path = (data.get('path') or '').strip()
+        if not rel_path:
+            return jsonify({'success': False, 'error': 'path required'}), 400
+        # 安全拼接路径，防止越权
+        norm_rel = os.path.normpath(rel_path)
+        abs_path = os.path.abspath(os.path.join(RESULTS_FOLDER, norm_rel))
+        if not abs_path.startswith(os.path.abspath(RESULTS_FOLDER)):
+            return jsonify({'success': False, 'error': 'invalid path'}), 400
+        if not os.path.isfile(abs_path):
+            return jsonify({'success': False, 'error': 'file not found'}), 404
+        os.remove(abs_path)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/save_result', methods=['POST'])
 def save_result_api():
