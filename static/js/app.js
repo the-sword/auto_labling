@@ -29,6 +29,10 @@ const thresholdSlider = document.getElementById('thresholdSlider');
 const thresholdValue = document.getElementById('thresholdValue');
 const maskIouSlider = document.getElementById('maskIouSlider');
 const maskIouValue = document.getElementById('maskIouValue');
+const polyEpsSlider = document.getElementById('polyEpsSlider');
+const polyEpsValue = document.getElementById('polyEpsValue');
+const polyCollinearSlider = document.getElementById('polyCollinearSlider');
+const polyCollinearValue = document.getElementById('polyCollinearValue');
 const polygonRefinement = document.getElementById('polygonRefinement');
 const segmentBtn = document.getElementById('segmentBtn');
 const clearBtn = document.getElementById('clearBtn');
@@ -138,6 +142,20 @@ function initializeEventListeners() {
         maskIouSlider.addEventListener('input', (e) => {
             maskIouValue.textContent = e.target.value;
         });
+        // 初始化显示
+        maskIouValue.textContent = maskIouSlider.value;
+    }
+    if (polyEpsSlider) {
+        polyEpsSlider.addEventListener('input', (e) => {
+            if (polyEpsValue) polyEpsValue.textContent = e.target.value;
+        });
+        if (polyEpsValue) polyEpsValue.textContent = polyEpsSlider.value;
+    }
+    if (polyCollinearSlider) {
+        polyCollinearSlider.addEventListener('input', (e) => {
+            if (polyCollinearValue) polyCollinearValue.textContent = e.target.value;
+        });
+        if (polyCollinearValue) polyCollinearValue.textContent = polyCollinearSlider.value;
     }
 
     // 操作按钮
@@ -278,6 +296,8 @@ async function performSegmentation() {
                 threshold: parseFloat(thresholdSlider.value),
                 polygon_refinement: polygonRefinement.checked,
                 mask_iou_threshold: maskIouSlider ? parseFloat(maskIouSlider.value) : 0.5,
+                polygon_simplify_epsilon: polyEpsSlider ? parseFloat(polyEpsSlider.value) : 2.0,
+                polygon_collinear_epsilon: polyCollinearSlider ? parseFloat(polyCollinearSlider.value) : 1.0,
                 manual_annotations: manualAnnotations
             })
         });

@@ -53,8 +53,41 @@ class DetectionResult:
                                    xmax=detection_dict['box']['xmax'],
                                    ymax=detection_dict['box']['ymax']))
 
-def mask_to_polygon(mask: np.ndarray) -> List[List[int]]:
-    """将mask转换为多边形坐标"""
+def simplify_polygon(points: List[List[int]], epsilon: float = 2.0, collinear_eps: float = 1.0) -> List[List[int]]:
+    """简化多边形点集：
+    - 使用 Ramer–Douglas–Peucker（approxPolyDP）按像素误差 epsilon 简化
+    - 进一步删除共线点（相邻三点构成的三角形面积 < collinear_eps）
+    """
+    if not points or len(points) < 3:
+        return points
+
+    # 先用 approxPolyDP（RDP）
+    cnt = np.array(points, dtype=np.int32).reshape(-1, 1, 2)
+    approx = cv2.approxPolyDP(cnt, epsilon=epsilon, closed=True)
+    poly = approx.reshape(-1, 2).tolist()
+
+    # 再去除共线点
+    def area2(a, b, c):
+        return abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+
+    if len(poly) > 3:
+        filtered = []
+        n = len(poly)
+        for i in range(n):
+            prev = poly[(i - 1) % n]
+            cur = poly[i]
+            nxt = poly[(i + 1) % n]
+            # 面积为0意味着完全共线；允许一个小阈值
+            if area2(prev, cur, nxt) <= collinear_eps:
+                continue
+            filtered.append(cur)
+        # 保证至少三点
+        if len(filtered) >= 3:
+            poly = filtered
+    return poly
+
+def mask_to_polygon(mask: np.ndarray, epsilon: float = 2.0, collinear_eps: float = 1.0) -> List[List[int]]:
+    """将mask转换为简化后的多边形坐标"""
     if mask is None:
         return []
 
@@ -64,6 +97,7 @@ def mask_to_polygon(mask: np.ndarray) -> List[List[int]]:
 
     largest_contour = max(contours, key=cv2.contourArea)
     polygon = largest_contour.reshape(-1, 2).tolist()
+    polygon = simplify_polygon(polygon, epsilon=epsilon, collinear_eps=collinear_eps)
     return polygon
 
 def get_boxes(results: List[DetectionResult]) -> List[List[float]]:
@@ -151,7 +185,8 @@ def mask_level_nms(detections: List[DetectionResult], mask_iou_threshold: float 
             kept.append(det)
     return kept
 
-def refine_masks(masks: torch.BoolTensor, polygon_refinement: bool = False) -> List[np.ndarray]:
+def refine_masks(masks: torch.BoolTensor, polygon_refinement: bool = False,
+                 poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> List[np.ndarray]:
     """优化mask"""
     masks = masks.cpu().float()
     masks = masks.permute(0, 2, 3, 1)
@@ -163,7 +198,7 @@ def refine_masks(masks: torch.BoolTensor, polygon_refinement: bool = False) -> L
     if polygon_refinement:
         for idx, mask in enumerate(masks):
             shape = mask.shape
-            polygon = mask_to_polygon(mask)
+            polygon = mask_to_polygon(mask, epsilon=poly_simplify_eps, collinear_eps=poly_collinear_eps)
             if polygon:
                 mask = polygon_to_mask(polygon, shape)
                 masks[idx] = mask
@@ -203,7 +238,10 @@ def detect(image: Image.Image, labels: List[str], threshold: float = 0.3) -> Lis
     # 取消框级NMS，保留所有候选，后续在mask层级进行冲突消解
     return results
 
-def segment(image: Image.Image, detection_results: List[DetectionResult], polygon_refinement: bool = False, mask_iou_threshold: float = 0.5) -> List[DetectionResult]:
+def segment(image: Image.Image, detection_results: List[DetectionResult], polygon_refinement: bool = False,
+            mask_iou_threshold: float = 0.5,
+            poly_simplify_eps: float = 2.0,
+            poly_collinear_eps: float = 1.0) -> List[DetectionResult]:
     """使用SAM生成分割mask"""
     global segmentator, processor
 
@@ -230,7 +268,7 @@ def segment(image: Image.Image, detection_results: List[DetectionResult], polygo
         reshaped_input_sizes=inputs.reshaped_input_sizes
     )[0]
 
-    masks = refine_masks(masks, polygon_refinement)
+    masks = refine_masks(masks, polygon_refinement, poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps)
 
     for detection_result, mask in zip(detection_results, masks):
         detection_result.mask = mask
@@ -240,15 +278,18 @@ def segment(image: Image.Image, detection_results: List[DetectionResult], polygo
 
     return detection_results
 
-def grounded_segmentation(image_data: bytes, labels: List[str], threshold: float = 0.3, polygon_refinement: bool = False, mask_iou_threshold: float = 0.5) -> Tuple[np.ndarray, List[DetectionResult]]:
+def grounded_segmentation(image_data: bytes, labels: List[str], threshold: float = 0.3,
+                          polygon_refinement: bool = False, mask_iou_threshold: float = 0.5,
+                          poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Tuple[np.ndarray, List[DetectionResult]]:
     """执行完整的grounded segmentation流程"""
     image = load_image(image_data)
     detections = detect(image, labels, threshold)
-    detections = segment(image, detections, polygon_refinement, mask_iou_threshold)
+    detections = segment(image, detections, polygon_refinement, mask_iou_threshold,
+                         poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps)
     print(f"detections: {detections}")
     return np.array(image), detections
 
-def detection_result_to_dict(detection: DetectionResult) -> Dict:
+def detection_result_to_dict(detection: DetectionResult, poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Dict:
     """将DetectionResult转换为可序列化的字典"""
     result = {
         'score': float(detection.score),
@@ -274,7 +315,7 @@ def detection_result_to_dict(detection: DetectionResult) -> Dict:
         result['mask'] = mask_base64
 
         # 添加多边形坐标
-        polygon = mask_to_polygon(detection.mask)
+        polygon = mask_to_polygon(detection.mask, epsilon=poly_simplify_eps, collinear_eps=poly_collinear_eps)
         result['polygon'] = polygon
 
     return result
@@ -297,9 +338,20 @@ def segment_api():
         mask_iou_threshold = float(data.get('mask_iou_threshold', 0.5))
         manual_annotations = data.get('manual_annotations', []) or []
 
+        # 读取多边形简化参数
+        try:
+            poly_simplify_eps = float(data.get('polygon_simplify_epsilon', 2.0))
+        except Exception:
+            poly_simplify_eps = 2.0
+        try:
+            poly_collinear_eps = float(data.get('polygon_collinear_epsilon', 1.0))
+        except Exception:
+            poly_collinear_eps = 1.0
+
         # 执行分割（自动检测+分割）
         image_array, detections = grounded_segmentation(
-            image_data, labels, threshold, polygon_refinement, mask_iou_threshold
+            image_data, labels, threshold, polygon_refinement, mask_iou_threshold,
+            poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps
         )
 
         # 将手动标注转换为 DetectionResult，并合并
@@ -350,7 +402,7 @@ def segment_api():
         detections = mask_level_nms(detections, mask_iou_threshold=mask_iou_threshold)
 
         # 转换结果为JSON格式
-        results = [detection_result_to_dict(detection) for detection in detections]
+        results = [detection_result_to_dict(detection, poly_simplify_eps, poly_collinear_eps) for detection in detections]
 
         # 将原图转换为base64
         image_pil = Image.fromarray(image_array)

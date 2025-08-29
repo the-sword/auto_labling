@@ -54,6 +54,16 @@
                             <label for="maskIouSlider" class="form-label">Mask IoU 阈值: <span id="maskIouValue">0.5</span></label>
                             <input type="range" class="form-range" id="maskIouSlider" min="0.1" max="0.9" step="0.05" value="0.5">
                         </div>
+                        <div class="mb-3">
+                            <label for="polyEpsSlider" class="form-label">轮廓简化强度 ε: <span id="polyEpsValue">2.0</span></label>
+                            <input type="range" class="form-range" id="polyEpsSlider" min="0" max="10" step="0.5" value="2.0">
+                            <div class="form-text">值越大，点数越少；0 表示不简化。</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="polyCollinearSlider" class="form-label">共线点合并阈值: <span id="polyCollinearValue">1.0</span></label>
+                            <input type="range" class="form-range" id="polyCollinearSlider" min="0" max="5" step="0.5" value="1.0">
+                            <div class="form-text">相邻三点近乎共线时合并，中等即可。</div>
+                        </div>
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="polygonRefinement" checked>
                             <label class="form-check-label" for="polygonRefinement">
