@@ -13,6 +13,59 @@ let imageQueue = []; // [{ name, file, dataURL (lazy) }]
 let currentImageIndex = -1;
 let perImageResults = new Map(); // key: index, value: { detections, resultImageBase64 }
 
+// 在画布上绘制带圆角背景的文本，提升可读性
+function drawTextWithBackground(ctx, text, x, y, options = {}) {
+    const {
+        font = 'bold 14px Arial',
+        paddingX = 6,
+        paddingY = 3,
+        radius = 6,
+        bgColor = 'rgba(0,0,0,0.6)',
+        textColor = '#fff',
+        align = 'left',
+        baseline = 'top',
+        shadow = true
+    } = options;
+
+    ctx.save();
+    ctx.font = font;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    const metrics = ctx.measureText(text);
+    const textWidth = metrics.width;
+    const textHeight = Math.max(parseInt(font.match(/(\d+)px/)[1] || 14, 10), 10);
+
+    // 计算背景框位置（基于左上角）
+    let bx = x, by = y;
+    if (align === 'center') bx = x - (textWidth / 2) - paddingX;
+    else if (align === 'right') bx = x - textWidth - paddingX * 2;
+    const bw = textWidth + paddingX * 2;
+    const bh = textHeight + paddingY * 2;
+
+    // 背景圆角矩形
+    ctx.beginPath();
+    const r = Math.min(radius, bh / 2);
+    ctx.moveTo(bx + r, by);
+    ctx.arcTo(bx + bw, by, bx + bw, by + bh, r);
+    ctx.arcTo(bx + bw, by + bh, bx, by + bh, r);
+    ctx.arcTo(bx, by + bh, bx, by, r);
+    ctx.arcTo(bx, by, bx + bw, by, r);
+    ctx.closePath();
+    ctx.fillStyle = bgColor;
+    ctx.fill();
+
+    // 文本
+    if (shadow) {
+        ctx.shadowColor = 'rgba(0,0,0,0.6)';
+        ctx.shadowBlur = 2;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 1;
+    }
+    ctx.fillStyle = textColor;
+    ctx.fillText(text, bx + paddingX, by + paddingY);
+    ctx.restore();
+}
+
 // 同步结果列表的悬浮高亮
 function updateDetectionListHover() {
     if (!detectionsList) return;
@@ -589,10 +642,19 @@ async function buildBaseLayer(imageSrc, detections) {
                 bctx.lineWidth = 2;
                 bctx.strokeRect(box.xmin, box.ymin, box.xmax - box.xmin, box.ymax - box.ymin);
 
-                bctx.fillStyle = colorHex;
-                bctx.font = '14px Arial';
                 const scoreText = typeof detection.score === 'number' ? detection.score.toFixed(2) : '1.00';
-                bctx.fillText(`${detection.label}: ${scoreText}`, box.xmin, Math.max(12, box.ymin - 5));
+                const labelText = `${sanitizeLabel(detection.label)}: ${scoreText}`;
+                drawTextWithBackground(bctx, labelText, box.xmin, Math.max(2, box.ymin - 18), {
+                    font: 'bold 14px Arial',
+                    bgColor: 'rgba(0,0,0,0.55)',
+                    textColor: '#FFFFFF',
+                    paddingX: 6,
+                    paddingY: 3,
+                    radius: 6,
+                    align: 'left',
+                    baseline: 'top',
+                    shadow: true
+                });
             }
 
             // 画多边形轮廓（如果有）
