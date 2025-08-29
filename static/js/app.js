@@ -26,6 +26,11 @@ const resultCanvas = document.getElementById('resultCanvas');
 const detectionsList = document.getElementById('detectionsList');
 const loadingOverlay = document.getElementById('loadingOverlay');
 const errorModal = new bootstrap.Modal(document.getElementById('errorModal'));
+const annotateToggleBtn = document.getElementById('annotateToggleBtn');
+
+// 手动标注状态
+let isAnnotating = false;
+let annotationPoints = [];
 
 // 预定义标签（可点击快速添加）
 const PREDEFINED_LABELS = [
@@ -124,6 +129,11 @@ function initializeEventListeners() {
     // 操作按钮
     segmentBtn.addEventListener('click', performSegmentation);
     clearBtn.addEventListener('click', clearResults);
+
+    // 手动标注开关
+    if (annotateToggleBtn) {
+        annotateToggleBtn.addEventListener('click', toggleAnnotationMode);
+    }
 }
 
 // 拖拽处理
@@ -228,6 +238,17 @@ async function performSegmentation() {
     showLoading(true);
 
     try {
+        // 收集手动标注（没有mask且有polygon的项）
+        const manualAnnotations = (detectionResults || [])
+            .filter(d => Array.isArray(d.polygon) && d.polygon.length > 2 && !d.mask)
+            .map(d => ({
+                label: d.label,
+                score: typeof d.score === 'number' ? d.score : 1.0,
+                box: d.box,
+                polygon: d.polygon,
+                is_manual: true
+            }));
+
         const response = await fetch('/api/segment', {
             method: 'POST',
             headers: {
@@ -238,7 +259,8 @@ async function performSegmentation() {
                 labels: currentLabels,
                 threshold: parseFloat(thresholdSlider.value),
                 polygon_refinement: polygonRefinement.checked,
-                mask_iou_threshold: maskIouSlider ? parseFloat(maskIouSlider.value) : 0.5
+                mask_iou_threshold: maskIouSlider ? parseFloat(maskIouSlider.value) : 0.5,
+                manual_annotations: manualAnnotations
             })
         });
 
@@ -300,7 +322,12 @@ async function drawSegmentationResult(imageSrc, detections) {
             //print
             console.log(detection);
 
+            // 为每个目标确定颜色
+            const colorHex = generateRandomColor();
+            const colorRgb = hexToRgb(colorHex);
+
             if (detection.mask) {
+                // 有服务端mask：按像素着色
                 const maskImage = await loadImage(`data:image/png;base64,${detection.mask}`);
 
                 const tempCanvas = document.createElement('canvas');
@@ -310,8 +337,6 @@ async function drawSegmentationResult(imageSrc, detections) {
                 tempCtx.drawImage(maskImage, 0, 0);
 
                 const maskData = tempCtx.getImageData(0, 0, mainImage.width, mainImage.height);
-                const colorHex = generateRandomColor();
-                const colorRgb = hexToRgb(colorHex);
 
                 for (let i = 0; i < maskData.data.length; i += 4) {
                     const isMask = maskData.data[i] > 0; // red channel > 0
@@ -321,15 +346,27 @@ async function drawSegmentationResult(imageSrc, detections) {
                         maskData.data[i + 2] = colorRgb.b;
                         maskData.data[i + 3] = 128; // semi-transparent for mask
                     } else {
-                        // Make background fully transparent
-                        maskData.data[i + 3] = 0;
+                        maskData.data[i + 3] = 0; // fully transparent
                     }
                 }
                 tempCtx.putImageData(maskData, 0, 0);
-
                 ctx.drawImage(tempCanvas, 0, 0);
+            } else if (Array.isArray(detection.polygon) && detection.polygon.length > 2) {
+                // 无mask但有多边形（手动标注）：填充半透明区域
+                ctx.save();
+                ctx.beginPath();
+                detection.polygon.forEach((pt, i) => {
+                    if (i === 0) ctx.moveTo(pt[0], pt[1]);
+                    else ctx.lineTo(pt[0], pt[1]);
+                });
+                ctx.closePath();
+                ctx.fillStyle = `rgba(${colorRgb.r}, ${colorRgb.g}, ${colorRgb.b}, 0.35)`;
+                ctx.fill();
+                ctx.restore();
+            }
 
-                // Draw bounding box and label
+            // 无论是否有mask，都绘制bbox与标签
+            if (detection.box) {
                 const box = detection.box;
                 ctx.strokeStyle = colorHex;
                 ctx.lineWidth = 2;
@@ -337,7 +374,8 @@ async function drawSegmentationResult(imageSrc, detections) {
 
                 ctx.fillStyle = colorHex;
                 ctx.font = '14px Arial';
-                ctx.fillText(`${detection.label}: ${detection.score.toFixed(2)}`, box.xmin, box.ymin - 5);
+                const scoreText = typeof detection.score === 'number' ? detection.score.toFixed(2) : '1.00';
+                ctx.fillText(`${detection.label}: ${scoreText}`, box.xmin, Math.max(12, box.ymin - 5));
             }
 
             // 画多边形轮廓（如果有）
@@ -472,8 +510,15 @@ function enableCanvasInteractions() {
     };
 
     canvas.onmousedown = (evt) => {
-        if (selectedDetectionIndex == null) return;
         const pos = getCanvasPos(evt);
+        if (isAnnotating) {
+            // 添加一个顶点
+            annotationPoints.push([Math.round(pos.x), Math.round(pos.y)]);
+            redrawWithAnnotation();
+            return;
+        }
+
+        if (selectedDetectionIndex == null) return;
         const det = detectionResults[selectedDetectionIndex];
         if (!det || !Array.isArray(det.polygon)) return;
 
@@ -496,6 +541,11 @@ function enableCanvasInteractions() {
     };
 
     canvas.onmousemove = (evt) => {
+        if (isAnnotating) {
+            // 预览最后一个点到鼠标位置的线段
+            redrawWithAnnotation(evt, getCanvasPos);
+            return;
+        }
         if (!isDraggingVertex || selectedDetectionIndex == null) return;
         const pos = getCanvasPos(evt);
         const det = detectionResults[selectedDetectionIndex];
@@ -512,11 +562,106 @@ function enableCanvasInteractions() {
     };
     canvas.onmouseup = endDrag;
     canvas.onmouseleave = endDrag;
+
+    // 双击完成标注
+    canvas.ondblclick = () => {
+        if (isAnnotating) finishAnnotation();
+    };
+
+    // 键盘事件：Enter完成，Esc取消，Backspace撤销
+    document.onkeydown = (e) => {
+        if (!isAnnotating) return;
+        if (e.key === 'Enter') {
+            finishAnnotation();
+        } else if (e.key === 'Escape') {
+            cancelAnnotation();
+        } else if (e.key === 'Backspace' || e.key === 'Delete') {
+            if (annotationPoints.length > 0) {
+                annotationPoints.pop();
+                redrawWithAnnotation();
+            }
+            e.preventDefault();
+        }
+    };
 }
 
 function redraw() {
     if (!lastResultImageBase64) return;
     drawSegmentationResult(lastResultImageBase64, detectionResults);
+}
+
+function redrawWithAnnotation(evt, getCanvasPos) {
+    redraw();
+    const ctx = resultCanvas.getContext('2d');
+    if (!ctx || annotationPoints.length === 0) return;
+    ctx.save();
+    ctx.strokeStyle = '#FFA500';
+    ctx.fillStyle = 'rgba(255,165,0,0.15)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < annotationPoints.length; i++) {
+        const [x, y] = annotationPoints[i];
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    // 临时预览线段到当前鼠标
+    if (evt && typeof getCanvasPos === 'function') {
+        const p = getCanvasPos(evt);
+        const last = annotationPoints[annotationPoints.length - 1];
+        ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+    // 画点句柄
+    for (const [x, y] of annotationPoints) drawHandle(ctx, x, y);
+    ctx.restore();
+}
+
+function toggleAnnotationMode() {
+    if (!resultCanvas || !resultCanvas.width) {
+        showError('请先运行分割或加载结果图像后再进行标注');
+        return;
+    }
+    isAnnotating = !isAnnotating;
+    annotationPoints = [];
+    annotateToggleBtn.classList.toggle('active', isAnnotating);
+    annotateToggleBtn.innerHTML = isAnnotating
+        ? '<i class="fas fa-draw-polygon"></i> 退出标注模式'
+        : '<i class="fas fa-draw-polygon"></i> 手动标注模式';
+    redraw();
+}
+
+function finishAnnotation() {
+    if (annotationPoints.length < 3) {
+        showError('多边形至少需要3个点');
+        return;
+    }
+    // 询问标签
+    const label = prompt('输入该标注的标签：', (currentLabels[0] || 'custom')) || 'custom';
+    // 计算bbox
+    const xs = annotationPoints.map(p => p[0]);
+    const ys = annotationPoints.map(p => p[1]);
+    const box = {
+        xmin: Math.min(...xs),
+        ymin: Math.min(...ys),
+        xmax: Math.max(...xs),
+        ymax: Math.max(...ys)
+    };
+    const det = { label, score: 1.0, box, polygon: [...annotationPoints], is_manual: true };
+    detectionResults.push(det);
+    displayDetectionsList(detectionResults);
+    // 结束标注
+    isAnnotating = false;
+    annotationPoints = [];
+    annotateToggleBtn.classList.remove('active');
+    annotateToggleBtn.innerHTML = '<i class="fas fa-draw-polygon"></i> 手动标注模式';
+    redraw();
+}
+
+function cancelAnnotation() {
+    annotationPoints = [];
+    isAnnotating = false;
+    annotateToggleBtn.classList.remove('active');
+    annotateToggleBtn.innerHTML = '<i class="fas fa-draw-polygon"></i> 手动标注模式';
+    redraw();
 }
 
 function drawHandle(ctx, x, y) {

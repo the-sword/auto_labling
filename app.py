@@ -261,6 +261,10 @@ def detection_result_to_dict(detection: DetectionResult) -> Dict:
         }
     }
 
+    # 标记手动标注来源（若存在）
+    if hasattr(detection, 'is_manual') and getattr(detection, 'is_manual'):
+        result['is_manual'] = True
+
     if detection.mask is not None:
         # 将mask转换为base64编码
         mask_pil = Image.fromarray(detection.mask.astype(np.uint8) * 255)
@@ -291,11 +295,59 @@ def segment_api():
         threshold = data.get('threshold', 0.3)
         polygon_refinement = data.get('polygon_refinement', True)
         mask_iou_threshold = float(data.get('mask_iou_threshold', 0.5))
+        manual_annotations = data.get('manual_annotations', []) or []
 
-        # 执行分割
+        # 执行分割（自动检测+分割）
         image_array, detections = grounded_segmentation(
             image_data, labels, threshold, polygon_refinement, mask_iou_threshold
         )
+
+        # 将手动标注转换为 DetectionResult，并合并
+        try:
+            h, w = int(Image.open(io.BytesIO(image_data)).height), int(Image.open(io.BytesIO(image_data)).width)
+        except Exception:
+            # 回退：从已生成的image_array推断
+            h, w = int(image_array.shape[0]), int(image_array.shape[1])
+
+        for ann in manual_annotations:
+            polygon = ann.get('polygon') or []
+            if not isinstance(polygon, list) or len(polygon) < 3:
+                continue
+            label = str(ann.get('label', 'manual'))
+            try:
+                score = float(ann.get('score', 1.0))
+            except Exception:
+                score = 1.0
+            # 计算/校验bbox
+            box_dict = ann.get('box') or {}
+            if not all(k in box_dict for k in ('xmin', 'ymin', 'xmax', 'ymax')):
+                xs = [int(p[0]) for p in polygon]
+                ys = [int(p[1]) for p in polygon]
+                box_dict = {
+                    'xmin': int(max(0, min(xs))),
+                    'ymin': int(max(0, min(ys))),
+                    'xmax': int(min(w - 1, max(xs))),
+                    'ymax': int(min(h - 1, max(ys)))
+                }
+
+            box = BoundingBox(
+                xmin=int(box_dict['xmin']),
+                ymin=int(box_dict['ymin']),
+                xmax=int(box_dict['xmax']),
+                ymax=int(box_dict['ymax'])
+            )
+
+            # 生成mask并归一化为0/1
+            mask = polygon_to_mask([(int(p[0]), int(p[1])) for p in polygon], (h, w))
+            mask = (mask > 0).astype(np.uint8)
+
+            det = DetectionResult(score=score, label=label, box=box, mask=mask)
+            # 动态标记为手动
+            setattr(det, 'is_manual', True)
+            detections.append(det)
+
+        # 融合后在mask层级去重（避免多标签覆盖同一物体）
+        detections = mask_level_nms(detections, mask_iou_threshold=mask_iou_threshold)
 
         # 转换结果为JSON格式
         results = [detection_result_to_dict(detection) for detection in detections]
