@@ -16,6 +16,8 @@ const addLabelBtn = document.getElementById('addLabelBtn');
 const labelsList = document.getElementById('labelsList');
 const thresholdSlider = document.getElementById('thresholdSlider');
 const thresholdValue = document.getElementById('thresholdValue');
+const maskIouSlider = document.getElementById('maskIouSlider');
+const maskIouValue = document.getElementById('maskIouValue');
 const polygonRefinement = document.getElementById('polygonRefinement');
 const segmentBtn = document.getElementById('segmentBtn');
 const clearBtn = document.getElementById('clearBtn');
@@ -114,6 +116,11 @@ function initializeEventListeners() {
     thresholdSlider.addEventListener('input', (e) => {
         thresholdValue.textContent = e.target.value;
     });
+    if (maskIouSlider) {
+        maskIouSlider.addEventListener('input', (e) => {
+            maskIouValue.textContent = e.target.value;
+        });
+    }
 
     // 操作按钮
     segmentBtn.addEventListener('click', performSegmentation);
@@ -228,7 +235,8 @@ async function performSegmentation() {
                 image: currentImage,
                 labels: currentLabels,
                 threshold: parseFloat(thresholdSlider.value),
-                polygon_refinement: polygonRefinement.checked
+                polygon_refinement: polygonRefinement.checked,
+                mask_iou_threshold: maskIouSlider ? parseFloat(maskIouSlider.value) : 0.5
             })
         });
 

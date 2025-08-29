@@ -203,7 +203,7 @@ def detect(image: Image.Image, labels: List[str], threshold: float = 0.3) -> Lis
     # 取消框级NMS，保留所有候选，后续在mask层级进行冲突消解
     return results
 
-def segment(image: Image.Image, detection_results: List[DetectionResult], polygon_refinement: bool = False) -> List[DetectionResult]:
+def segment(image: Image.Image, detection_results: List[DetectionResult], polygon_refinement: bool = False, mask_iou_threshold: float = 0.5) -> List[DetectionResult]:
     """使用SAM生成分割mask"""
     global segmentator, processor
 
@@ -236,15 +236,15 @@ def segment(image: Image.Image, detection_results: List[DetectionResult], polygo
         detection_result.mask = mask
 
     # 基于mask进行跨类别去重，避免同一物体被多个标签覆盖
-    detection_results = mask_level_nms(detection_results, mask_iou_threshold=0.5)
+    detection_results = mask_level_nms(detection_results, mask_iou_threshold=mask_iou_threshold)
 
     return detection_results
 
-def grounded_segmentation(image_data: bytes, labels: List[str], threshold: float = 0.3, polygon_refinement: bool = False) -> Tuple[np.ndarray, List[DetectionResult]]:
+def grounded_segmentation(image_data: bytes, labels: List[str], threshold: float = 0.3, polygon_refinement: bool = False, mask_iou_threshold: float = 0.5) -> Tuple[np.ndarray, List[DetectionResult]]:
     """执行完整的grounded segmentation流程"""
     image = load_image(image_data)
     detections = detect(image, labels, threshold)
-    detections = segment(image, detections, polygon_refinement)
+    detections = segment(image, detections, polygon_refinement, mask_iou_threshold)
     print(f"detections: {detections}")
     return np.array(image), detections
 
@@ -290,10 +290,11 @@ def segment_api():
         labels = data['labels']
         threshold = data.get('threshold', 0.3)
         polygon_refinement = data.get('polygon_refinement', True)
+        mask_iou_threshold = float(data.get('mask_iou_threshold', 0.5))
 
         # 执行分割
         image_array, detections = grounded_segmentation(
-            image_data, labels, threshold, polygon_refinement
+            image_data, labels, threshold, polygon_refinement, mask_iou_threshold
         )
 
         # 转换结果为JSON格式
