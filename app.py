@@ -21,6 +21,7 @@ from transformers import AutoModelForMaskGeneration, AutoProcessor, pipeline
 
 # 导入文件工具模块
 import file_utils
+import crawler
 
 app = Flask(__name__)
 CORS(app)
@@ -447,6 +448,51 @@ def segment_api():
 def health_check():
     """健康检查端点"""
     return jsonify({'status': 'healthy'})
+
+@app.route('/api/crawl', methods=['POST'])
+def crawl_api():
+    """图片爬虫：
+    接收 JSON { query, engine, limit, out_dir(optional) }
+    - engine: bing | baidu (google 暂不支持)
+    - limit: 下载数量，默认 30
+    - out_dir: 保存目录，若为相对路径，将相对于 RESULTS_FOLDER
+    返回下载明细。
+    """
+    try:
+        data = request.get_json() or {}
+        query = (data.get('query') or '').strip()
+        engine = (data.get('engine') or 'bing').lower()
+        try:
+            limit = int(data.get('limit', 30))
+        except Exception:
+            limit = 30
+        out_dir = data.get('out_dir') or ''
+
+        if not query:
+            return jsonify({'success': False, 'error': 'query required'}), 400
+
+        # 解析保存目录：相对路径则放到 RESULTS_FOLDER 下
+        if out_dir:
+            if not os.path.isabs(out_dir):
+                out_dir = os.path.join(RESULTS_FOLDER, out_dir)
+        else:
+            # 默认 results/auto_crawl/<query>
+            safe_query = crawler.sanitize_filename(query) or 'images'
+            out_dir = os.path.join(RESULTS_FOLDER, 'auto_crawl', safe_query)
+
+        os.makedirs(out_dir, exist_ok=True)
+
+        result = crawler.crawl_images(engine=engine, query=query, limit=limit, out_dir=out_dir)
+        # 为前端提供相对 results 路径，便于展示
+        try:
+            rel_to_results = os.path.relpath(out_dir, RESULTS_FOLDER)
+        except Exception:
+            rel_to_results = out_dir
+        result['out_dir'] = out_dir
+        result['out_dir_rel'] = rel_to_results
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/config/folders', methods=['GET', 'POST'])
 def config_folders_api():

@@ -10,7 +10,23 @@
 </head>
 <body>
     <div class="container-fluid">
-        <div class="row">
+        <!-- 顶部 Tabs -->
+        <ul class="nav nav-tabs mt-2" id="mainTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-autolabel" data-bs-toggle="tab" data-bs-target="#sheet-autolabel" type="button" role="tab" aria-controls="sheet-autolabel" aria-selected="true">
+                    <i class="fas fa-layer-group"></i> 自动标注系统
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-crawler" data-bs-toggle="tab" data-bs-target="#sheet-crawler" type="button" role="tab" aria-controls="sheet-crawler" aria-selected="false">
+                    <i class="fas fa-spider"></i> 图片爬虫
+                </button>
+            </li>
+        </ul>
+        <div class="tab-content" id="mainTabsContent">
+            <!-- 自动标注系统 Sheet -->
+            <div class="tab-pane fade show active" id="sheet-autolabel" role="tabpanel" aria-labelledby="tab-autolabel">
+                <div class="row">
             <!-- 侧边栏 -->
             <div class="col-md-3 sidebar">
                 <div class="sidebar-content">
@@ -200,20 +216,44 @@
         </div>
     </div>
 
-    <!-- 错误提示模态框 -->
-    <div class="modal fade" id="errorModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">
-                        <i class="fas fa-exclamation-triangle text-danger"></i> 错误
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body" id="errorMessage">
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+    <!-- 图片爬虫 Sheet -->
+    <div class="tab-pane fade" id="sheet-crawler" role="tabpanel" aria-labelledby="tab-crawler">
+        <div class="row mt-3">
+            <div class="col-md-10 col-lg-8 mx-auto">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-spider"></i> 图片爬虫
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label" for="crawlPageQuery">关键词</label>
+                                <input type="text" class="form-control" id="crawlPageQuery" placeholder="如：cow, fence" />
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" for="crawlPageEngine">搜索站点</label>
+                                <select class="form-select" id="crawlPageEngine">
+                                    <option value="bing">Bing 图片</option>
+                                    <option value="baidu">百度图片</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" for="crawlPageLimit">数量</label>
+                                <input type="number" class="form-control" id="crawlPageLimit" value="30" min="1" max="500" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" for="crawlPageOutDir">保存目录（相对 results/ 或绝对路径，可留空）</label>
+                                <input type="text" class="form-control" id="crawlPageOutDir" placeholder="auto_crawl/关键词" />
+                                <div class="form-text">留空则默认保存至 results/auto_crawl/关键词</div>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2 mt-3">
+                            <button class="btn btn-primary" id="crawlPageStartBtn">
+                                <i class="fas fa-download"></i> 开始爬取
+                            </button>
+                            <div class="align-self-center small text-muted" id="crawlPageStatus"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

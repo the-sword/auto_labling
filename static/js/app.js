@@ -26,6 +26,54 @@ let imageQueue = []; // [{ name, file, dataURL (lazy), relPath, serverPath, serv
 let currentImageIndex = -1;
 let perImageResults = new Map(); // key: index, value: { detections, resultImageBase64 }
 
+// ============ 图片爬虫（页签） ============
+function initCrawlPage() {
+    const startBtn = document.getElementById('crawlPageStartBtn');
+    if (!startBtn) return;
+    if (startBtn.dataset.bound === '1') return; // 防止重复绑定
+    startBtn.dataset.bound = '1';
+
+    startBtn.addEventListener('click', async () => {
+        const queryInput = document.getElementById('crawlPageQuery');
+        const engineSelect = document.getElementById('crawlPageEngine');
+        const limitInput = document.getElementById('crawlPageLimit');
+        const outDirInput = document.getElementById('crawlPageOutDir');
+        const statusBox = document.getElementById('crawlPageStatus');
+        const query = ((queryInput && queryInput.value) || '').trim();
+        const engine = (engineSelect && engineSelect.value) || 'bing';
+        const limit = parseInt((limitInput && limitInput.value) || '30', 10);
+        const outDir = ((outDirInput && outDirInput.value) || '').trim();
+        console.log('[crawl] start clicked', { query, engine, limit, outDir });
+        if (!query) {
+            showError('请输入关键词');
+            return;
+        }
+        startBtn.disabled = true;
+        startBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>爬取中...';
+        if (statusBox) statusBox.textContent = '';
+        try {
+            const resp = await fetch('/api/crawl', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, engine, limit, out_dir: outDir })
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                showError(data.error || '爬取失败');
+                return;
+            }
+            const msg = `已保存 ${data.saved_count}/${data.found} 张至: ${data.out_dir_rel || data.out_dir}`;
+            if (statusBox) statusBox.textContent = msg;
+            showSuccess('爬取完成');
+        } catch (e) {
+            showError('网络错误：' + (e?.message || e));
+        } finally {
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<i class="fas fa-download"></i> 开始爬取';
+        }
+    });
+}
+
 // 上传图片文件到后台，更新队列条目的 serverPath/serverUrl
 async function uploadFiles(files) {
     if (!files || files.length === 0) return;
@@ -227,7 +275,10 @@ const originalPlaceholder = document.getElementById('originalPlaceholder');
 const resultCanvas = document.getElementById('resultCanvas');
 const detectionsList = document.getElementById('detectionsList');
 const loadingOverlay = document.getElementById('loadingOverlay');
-const errorModal = new bootstrap.Modal(document.getElementById('errorModal'));
+// 安全初始化错误模态框（页面可能未包含该模态框）
+const errorModalEl = document.getElementById('errorModal');
+const errorMessageEl = document.getElementById('errorMessage');
+const errorModal = errorModalEl ? new bootstrap.Modal(errorModalEl) : null;
 const annotateToggleBtn = document.getElementById('annotateToggleBtn');
 const helpBtn = document.getElementById('helpBtn');
 const helpModal = new bootstrap.Modal(document.getElementById('helpModal'));
@@ -1083,8 +1134,13 @@ function showLoading(show) {
 }
 
 function showError(message) {
-    document.getElementById('errorMessage').textContent = message;
-    errorModal.show();
+    if (errorMessageEl && errorModal) {
+        errorMessageEl.textContent = message;
+        errorModal.show();
+        return;
+    }
+    // 兜底：没有错误模态框时使用 alert
+    alert(message);
 }
 
 function showSuccess(message) {
@@ -1727,4 +1783,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // 初始化文件夹配置对话框
     initFolderConfigModal();
+
+    // 初始化图片爬虫（页签）
+    initCrawlPage();
 });
