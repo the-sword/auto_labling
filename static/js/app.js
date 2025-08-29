@@ -700,9 +700,8 @@ function enableCanvasInteractions() {
     canvas.onmouseup = endDrag;
     canvas.onmouseleave = endDrag;
 
-    // 缩放（滚轮缩放到光标处）
+    // 缩放（滚轮缩放到光标处）——在任意模式下均可缩放，方便选择/编辑
     canvas.onwheel = (evt) => {
-        if (!isAnnotating) return; // 只在标注模式下启用缩放
         evt.preventDefault();
         const delta = -Math.sign(evt.deltaY); // 上滚放大，下滚缩小
         const zoomFactor = 1 + (0.12 * delta);
