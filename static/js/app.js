@@ -6,11 +6,32 @@ let selectedDetectionIndex = null; // 当前选中的分割结果索引
 let isDraggingVertex = false;      // 是否在拖拽多边形顶点
 let draggingVertexIndex = -1;      // 被拖拽的顶点索引
 let lastResultImageBase64 = null;  // 最近一次结果图像（用于重绘）
+let hoveredDetectionIndex = null;  // 悬浮的分割结果索引（用于联动高亮）
 
 // 多图队列
 let imageQueue = []; // [{ name, file, dataURL (lazy) }]
 let currentImageIndex = -1;
 let perImageResults = new Map(); // key: index, value: { detections, resultImageBase64 }
+
+// 同步结果列表的悬浮高亮
+function updateDetectionListHover() {
+    if (!detectionsList) return;
+    const items = detectionsList.querySelectorAll('.detection-item');
+    items.forEach(el => {
+        const idx = parseInt(el.getAttribute('data-index'));
+        if (Number.isInteger(idx)) {
+            el.classList.toggle('hovered', idx === hoveredDetectionIndex);
+        }
+    });
+}
+
+function setHoveredDetection(index) {
+    const next = (Number.isInteger(index) && index >= 0 && index < detectionResults.length) ? index : null;
+    if (next === hoveredDetectionIndex) return;
+    hoveredDetectionIndex = next;
+    updateDetectionListHover();
+    redraw();
+}
 
 // 视图变换（缩放/平移）
 let viewScale = 1;
@@ -211,6 +232,28 @@ function initializeEventListeners() {
     // 帮助按钮
     if (helpBtn) {
         helpBtn.addEventListener('click', () => helpModal.show());
+    }
+
+    // 结果列表悬浮联动（事件委托）
+    if (detectionsList) {
+        detectionsList.addEventListener('mouseover', (e) => {
+            const item = e.target.closest('.detection-item');
+            if (!item || !detectionsList.contains(item)) return;
+            const idx = parseInt(item.getAttribute('data-index'));
+            if (Number.isInteger(idx)) setHoveredDetection(idx);
+        });
+        detectionsList.addEventListener('mouseout', (e) => {
+            const related = e.relatedTarget;
+            if (related && detectionsList.contains(related)) return; // 仍在列表内
+            setHoveredDetection(null);
+        });
+        // 当移出某个item但仍在列表区域时，尝试读取新的item
+        detectionsList.addEventListener('mousemove', (e) => {
+            const item = e.target.closest('.detection-item');
+            if (!item) return;
+            const idx = parseInt(item.getAttribute('data-index'));
+            if (Number.isInteger(idx)) setHoveredDetection(idx);
+        });
     }
 }
 
@@ -604,7 +647,7 @@ function displayDetectionsList(detections) {
 
     detections.forEach((detection, index) => {
         const detectionItem = document.createElement('div');
-        detectionItem.className = `detection-item fade-in ${index === selectedDetectionIndex ? 'selected' : ''}`.trim();
+        detectionItem.className = `detection-item fade-in ${index === selectedDetectionIndex ? 'selected' : ''} ${index === hoveredDetectionIndex ? 'hovered' : ''}`.trim();
         detectionItem.setAttribute('data-index', String(index));
         detectionItem.innerHTML = `
             <div class="d-flex justify-content-between align-items-start">
@@ -644,8 +687,9 @@ function displayDetectionsList(detections) {
             if (Number.isInteger(idx)) selectDetection(idx);
         }
     };
-    // 渲染后同步一次选中高亮（防止外部修改 selectedDetectionIndex 后需要手动触发）
+    // 渲染后同步一次高亮（选中与悬浮）
     updateDetectionListSelection();
+    updateDetectionListHover();
 }
 
 // 同步结果列表的选中高亮
@@ -825,8 +869,13 @@ function enableCanvasInteractions() {
             redrawWithAnnotation(evt, getCanvasPos);
             return;
         }
-        if (!isDraggingVertex || selectedDetectionIndex == null) return;
         const pos = getCanvasPos(evt);
+        // 悬浮联动（未拖拽时，根据鼠标位置设置 hoveredDetectionIndex）
+        if (!isDraggingVertex) {
+            const idx = findDetectionAtPoint(pos.x, pos.y);
+            setHoveredDetection(idx !== -1 ? idx : null);
+        }
+        if (!isDraggingVertex || selectedDetectionIndex == null) return;
         const det = detectionResults[selectedDetectionIndex];
         if (!det || !Array.isArray(det.polygon)) return;
         if (draggingVertexIndex >= 0 && draggingVertexIndex < det.polygon.length) {
@@ -877,6 +926,11 @@ function enableCanvasInteractions() {
     // 双击完成标注
     canvas.ondblclick = () => {
         if (isAnnotating) finishAnnotation();
+    };
+
+    // 移出画布时清除悬浮高亮
+    canvas.onmouseleave = () => {
+        setHoveredDetection(null);
     };
 
     // 键盘事件：
@@ -933,6 +987,29 @@ function enableCanvasInteractions() {
 function redraw() {
     if (!lastResultImageBase64) return;
     drawFromBaseLayer();
+    // 在底图之上绘制悬浮高亮
+    if (hoveredDetectionIndex != null) {
+        const det = detectionResults[hoveredDetectionIndex];
+        if (det && Array.isArray(det.polygon) && det.polygon.length > 2) {
+            const ctx = resultCanvas.getContext('2d');
+            if (ctx) {
+                ctx.setTransform(viewScale, 0, 0, viewScale, viewOffsetX, viewOffsetY);
+                ctx.save();
+                ctx.beginPath();
+                det.polygon.forEach((pt, i) => {
+                    if (i === 0) ctx.moveTo(pt[0], pt[1]); else ctx.lineTo(pt[0], pt[1]);
+                });
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(79,70,229,0.10)';
+                ctx.strokeStyle = '#4f46e5';
+                ctx.lineWidth = 3;
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+            }
+        }
+    }
 }
 
 function redrawWithAnnotation(evt, getCanvasPos) {

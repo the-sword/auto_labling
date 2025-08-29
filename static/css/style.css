@@ -214,6 +214,12 @@ body {
     box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15) inset;
 }
 
+/* 悬浮项高亮（与画布联动，不改变选中态） */
+.detection-item.hovered:not(.selected) {
+    background: #f1f5ff;
+    border-left-color: #667eea;
+}
+
 .detection-info {
     flex: 1;
 }
