@@ -2,6 +2,10 @@
 let currentImage = null;
 let currentLabels = [];
 let detectionResults = [];
+let selectedDetectionIndex = null; // 当前选中的分割结果索引
+let isDraggingVertex = false;      // 是否在拖拽多边形顶点
+let draggingVertexIndex = -1;      // 被拖拽的顶点索引
+let lastResultImageBase64 = null;  // 最近一次结果图像（用于重绘）
 
 // DOM元素
 const uploadArea = document.getElementById('uploadArea');
@@ -249,6 +253,7 @@ function displayResults(imageSrc, detections) {
     originalImage.src = `data:image/png;base64,${imageSrc}`;
 
     // 绘制分割结果
+    lastResultImageBase64 = imageSrc;
     drawSegmentationResult(imageSrc, detections);
 
     // 显示检测结果列表
@@ -257,6 +262,9 @@ function displayResults(imageSrc, detections) {
     // 显示结果区域
     resultsSection.style.display = 'block';
     resultsSection.scrollIntoView({ behavior: 'smooth' });
+
+    // 启用画布交互
+    enableCanvasInteractions();
 }
 
 // 绘制分割结果
@@ -277,7 +285,8 @@ async function drawSegmentationResult(imageSrc, detections) {
         canvas.height = mainImage.height;
         ctx.drawImage(mainImage, 0, 0);
 
-        for (const detection of detections) {
+        for (let idx = 0; idx < detections.length; idx++) {
+            const detection = detections[idx];
             //print
             console.log(detection);
 
@@ -320,6 +329,29 @@ async function drawSegmentationResult(imageSrc, detections) {
                 ctx.font = '14px Arial';
                 ctx.fillText(`${detection.label}: ${detection.score.toFixed(2)}`, box.xmin, box.ymin - 5);
             }
+
+            // 画多边形轮廓（如果有）
+            if (Array.isArray(detection.polygon) && detection.polygon.length > 2) {
+                const isSelected = idx === selectedDetectionIndex;
+                ctx.save();
+                ctx.beginPath();
+                ctx.lineWidth = isSelected ? 3 : 2;
+                ctx.strokeStyle = isSelected ? '#00E0FF' : '#00FF88';
+                detection.polygon.forEach((pt, i) => {
+                    if (i === 0) ctx.moveTo(pt[0], pt[1]);
+                    else ctx.lineTo(pt[0], pt[1]);
+                });
+                ctx.closePath();
+                ctx.stroke();
+
+                // 选中时画可拖拽的顶点
+                if (isSelected) {
+                    for (const pt of detection.polygon) {
+                        drawHandle(ctx, pt[0], pt[1]);
+                    }
+                }
+                ctx.restore();
+            }
         }
     } catch (error) {
         console.error('Failed to draw segmentation result:', error);
@@ -335,16 +367,43 @@ function displayDetectionsList(detections) {
         const detectionItem = document.createElement('div');
         detectionItem.className = 'detection-item fade-in';
         detectionItem.innerHTML = `
-            <div class="detection-info">
-                <div class="detection-label">${detection.label}</div>
-                <div class="detection-score">置信度: ${(detection.score * 100).toFixed(1)}%</div>
-            </div>
-            <div class="detection-box">
-                [${detection.box.xmin}, ${detection.box.ymin}, ${detection.box.xmax}, ${detection.box.ymax}]
+            <div class="d-flex justify-content-between align-items-start">
+              <div class="detection-info" style="cursor: pointer;">
+                  <div class="detection-label" data-index="${index}">${detection.label}</div>
+                  <div class="detection-score">置信度: ${(detection.score * 100).toFixed(1)}%</div>
+                  <div class="detection-box text-muted small">
+                    [${detection.box.xmin}, ${detection.box.ymin}, ${detection.box.xmax}, ${detection.box.ymax}]
+                  </div>
+              </div>
+              <div class="btn-group btn-group-sm" role="group">
+                <button class="btn btn-outline-primary" data-action="select" data-index="${index}"><i class="fas fa-mouse-pointer"></i></button>
+                <button class="btn btn-outline-secondary" data-action="edit-label" data-index="${index}"><i class="fas fa-pen"></i></button>
+                <button class="btn btn-outline-danger" data-action="delete" data-index="${index}"><i class="fas fa-trash"></i></button>
+              </div>
             </div>
         `;
         detectionsList.appendChild(detectionItem);
     });
+
+    // 事件委托：选择/编辑标签/删除
+    detectionsList.onclick = (e) => {
+        const btn = e.target.closest('button');
+        if (btn) {
+            const action = btn.getAttribute('data-action');
+            const idx = parseInt(btn.getAttribute('data-index'));
+            if (Number.isInteger(idx)) {
+                if (action === 'select') selectDetection(idx);
+                if (action === 'edit-label') editLabelInline(idx);
+                if (action === 'delete') deleteDetection(idx);
+            }
+            return;
+        }
+        const info = e.target.closest('.detection-info');
+        if (info) {
+            const idx = parseInt(info.querySelector('.detection-label').getAttribute('data-index'));
+            if (Number.isInteger(idx)) selectDetection(idx);
+        }
+    };
 }
 
 // 清除结果
@@ -352,6 +411,9 @@ function clearResults() {
     currentImage = null;
     currentLabels = [];
     detectionResults = [];
+    selectedDetectionIndex = null;
+    draggingVertexIndex = -1;
+    isDraggingVertex = false;
 
     imageContainer.innerHTML = `
         <div class="placeholder-text">
@@ -383,6 +445,152 @@ function showLoading(show) {
 function showError(message) {
     document.getElementById('errorMessage').textContent = message;
     errorModal.show();
+}
+
+// ============ 交互与编辑 ============
+function enableCanvasInteractions() {
+    const canvas = resultCanvas;
+    const getCanvasPos = (evt) => {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        return {
+            x: (evt.clientX - rect.left) * scaleX,
+            y: (evt.clientY - rect.top) * scaleY
+        };
+    };
+
+    canvas.onmousedown = (evt) => {
+        if (selectedDetectionIndex == null) return;
+        const pos = getCanvasPos(evt);
+        const det = detectionResults[selectedDetectionIndex];
+        if (!det || !Array.isArray(det.polygon)) return;
+
+        // 先检测是否点中某个顶点
+        const vIdx = findNearbyVertex(det.polygon, pos.x, pos.y, 8);
+        if (vIdx !== -1) {
+            isDraggingVertex = true;
+            draggingVertexIndex = vIdx;
+            return;
+        }
+
+        // 若未点中顶点，检测是否点击到多边形内部 -> 选中
+        if (pointInPolygon(pos.x, pos.y, det.polygon)) {
+            // 已选中则保持
+        } else {
+            // 尝试选择其它目标
+            const idx = findDetectionAtPoint(pos.x, pos.y);
+            if (idx !== -1) selectDetection(idx);
+        }
+    };
+
+    canvas.onmousemove = (evt) => {
+        if (!isDraggingVertex || selectedDetectionIndex == null) return;
+        const pos = getCanvasPos(evt);
+        const det = detectionResults[selectedDetectionIndex];
+        if (!det || !Array.isArray(det.polygon)) return;
+        if (draggingVertexIndex >= 0 && draggingVertexIndex < det.polygon.length) {
+            det.polygon[draggingVertexIndex] = [Math.round(pos.x), Math.round(pos.y)];
+            redraw();
+        }
+    };
+
+    const endDrag = () => {
+        isDraggingVertex = false;
+        draggingVertexIndex = -1;
+    };
+    canvas.onmouseup = endDrag;
+    canvas.onmouseleave = endDrag;
+}
+
+function redraw() {
+    if (!lastResultImageBase64) return;
+    drawSegmentationResult(lastResultImageBase64, detectionResults);
+}
+
+function drawHandle(ctx, x, y) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.fillStyle = '#00E0FF';
+    ctx.strokeStyle = '#004D66';
+    ctx.lineWidth = 1.5;
+    ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+}
+
+function findNearbyVertex(poly, x, y, tol = 6) {
+    for (let i = 0; i < poly.length; i++) {
+        const [px, py] = poly[i];
+        if (Math.hypot(px - x, py - y) <= tol) return i;
+    }
+    return -1;
+}
+
+function pointInPolygon(x, y, polygon) {
+    // ray casting
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const xi = polygon[i][0], yi = polygon[i][1];
+        const xj = polygon[j][0], yj = polygon[j][1];
+        const intersect = ((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / (yj - yi + 1e-9) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+function findDetectionAtPoint(x, y) {
+    // 优先查找包含点的多边形
+    for (let i = detectionResults.length - 1; i >= 0; i--) {
+        const det = detectionResults[i];
+        if (Array.isArray(det.polygon) && det.polygon.length > 2) {
+            if (pointInPolygon(x, y, det.polygon)) return i;
+        } else {
+            // 回退到bbox
+            const b = det.box;
+            if (x >= b.xmin && x <= b.xmax && y >= b.ymin && y <= b.ymax) return i;
+        }
+    }
+    return -1;
+}
+
+function selectDetection(index) {
+    if (index < 0 || index >= detectionResults.length) return;
+    selectedDetectionIndex = index;
+    redraw();
+}
+
+function editLabelInline(index) {
+    if (index < 0 || index >= detectionResults.length) return;
+    // 找到对应DOM元素并替换为输入框
+    const labelDivs = detectionsList.querySelectorAll('.detection-label');
+    const labelDiv = Array.from(labelDivs).find(el => parseInt(el.getAttribute('data-index')) === index);
+    if (!labelDiv) return;
+    const old = detectionResults[index].label;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'form-control form-control-sm';
+    input.value = old;
+    labelDiv.replaceWith(input);
+    input.focus();
+    const commit = () => {
+        const v = input.value.trim();
+        if (v) detectionResults[index].label = v;
+        displayDetectionsList(detectionResults);
+        redraw();
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); });
+    input.addEventListener('blur', commit);
+}
+
+function deleteDetection(index) {
+    if (index < 0 || index >= detectionResults.length) return;
+    detectionResults.splice(index, 1);
+    if (selectedDetectionIndex === index) selectedDetectionIndex = null;
+    if (selectedDetectionIndex > index) selectedDetectionIndex--;
+    displayDetectionsList(detectionResults);
+    redraw();
 }
 
 // 页面加载完成后初始化

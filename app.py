@@ -114,6 +114,43 @@ def nms_detections(detections: List[DetectionResult], iou_threshold: float = 0.5
 
     return kept
 
+def mask_iou(mask_a: Optional[np.ndarray], mask_b: Optional[np.ndarray]) -> float:
+    """计算两个二值mask的IoU。若任一为空或形状不一致，返回0。"""
+    if mask_a is None or mask_b is None:
+        return 0.0
+    if mask_a.shape != mask_b.shape:
+        return 0.0
+    a = mask_a.astype(bool)
+    b = mask_b.astype(bool)
+    inter = np.logical_and(a, b).sum()
+    union = np.logical_or(a, b).sum()
+    if union == 0:
+        return 0.0
+    return float(inter) / float(union)
+
+def mask_level_nms(detections: List[DetectionResult], mask_iou_threshold: float = 0.5) -> List[DetectionResult]:
+    """
+    基于mask的跨类别NMS：
+    - 先按score从高到低排序
+    - 若一个候选与已保留候选的mask IoU>=阈值，则丢弃（认为是同一物体的重复标签），保留分数更高者
+    - 这样当同一物体被打上多个标签时，只保留最高分的那个标签
+    """
+    if not detections:
+        return detections
+
+    sorted_dets = sorted(detections, key=lambda d: d.score, reverse=True)
+    kept: List[DetectionResult] = []
+    for det in sorted_dets:
+        duplicate = False
+        for k in kept:
+            iou = mask_iou(det.mask, k.mask)
+            if iou >= mask_iou_threshold:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(det)
+    return kept
+
 def refine_masks(masks: torch.BoolTensor, polygon_refinement: bool = False) -> List[np.ndarray]:
     """优化mask"""
     masks = masks.cpu().float()
@@ -163,8 +200,7 @@ def detect(image: Image.Image, labels: List[str], threshold: float = 0.3) -> Lis
     results = object_detector(image, candidate_labels=labels, threshold=threshold)
     results = [DetectionResult.from_dict(result) for result in results]
 
-    # 对不同标签产生的高度重叠框进行NMS，避免一个物体拥有多个标签
-    results = nms_detections(results, iou_threshold=0.5)
+    # 取消框级NMS，保留所有候选，后续在mask层级进行冲突消解
     return results
 
 def segment(image: Image.Image, detection_results: List[DetectionResult], polygon_refinement: bool = False) -> List[DetectionResult]:
@@ -198,6 +234,9 @@ def segment(image: Image.Image, detection_results: List[DetectionResult], polygo
 
     for detection_result, mask in zip(detection_results, masks):
         detection_result.mask = mask
+
+    # 基于mask进行跨类别去重，避免同一物体被多个标签覆盖
+    detection_results = mask_level_nms(detection_results, mask_iou_threshold=0.5)
 
     return detection_results
 
