@@ -73,6 +73,9 @@
                         <button class="btn btn-outline-secondary w-100" id="clearBtn">
                             <i class="fas fa-trash"></i> 清除结果
                         </button>
+                        <button class="btn btn-link w-100 mt-2" id="helpBtn">
+                            <i class="fas fa-question-circle"></i> 使用提示
+                        </button>
                     </div>
 
                     <!-- 示例标签 -->
@@ -158,6 +161,59 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body" id="errorMessage">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 使用提示模态框 -->
+    <div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="helpModalLabel"><i class="fas fa-question-circle"></i> 使用提示</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <h6 class="text-primary">基础操作</h6>
+                        <ul class="mb-0">
+                            <li>上传图片：点击或拖拽图片到左侧“上传图片”。</li>
+                            <li>输入/选择标签后点击“开始分割”。</li>
+                            <li>结果列表中可选择目标、修改标签或删除目标。</li>
+                        </ul>
+                    </div>
+                    <div class="mb-3">
+                        <h6 class="text-primary">手动标注模式</h6>
+                        <ul class="mb-0">
+                            <li>点击“手动标注模式”进入/退出。</li>
+                            <li>在结果画布上逐点点击绘制多边形，双击或回车完成，Esc 取消。</li>
+                            <li>Backspace/Delete 撤销最后一个点。</li>
+                            <li>Alt + 点击顶点 删除该具体点。</li>
+                            <li>滚轮缩放（以鼠标为中心），空格 + 左键拖动 或 中键拖动 平移。</li>
+                        </ul>
+                    </div>
+                    <div class="mb-3">
+                        <h6 class="text-primary">编辑已有分割</h6>
+                        <ul class="mb-0">
+                            <li>在列表中点击“选择”，或在画布上点击目标以选中。</li>
+                            <li>拖动顶点 可微调形状，拖拽结束后会更新边框与显示。</li>
+                            <li>Alt + 点击顶点 删除该点（多边形至少保留 3 个点）。</li>
+                            <li>Backspace/Delete 删除最后一个点（选中状态下）。</li>
+                        </ul>
+                    </div>
+                    <div class="mb-0">
+                        <h6 class="text-primary">快捷键</h6>
+                        <ul class="mb-0">
+                            <li>?: 打开本帮助。</li>
+                            <li>Enter/Esc：完成/取消当前手动标注。</li>
+                            <li>Backspace/Delete：撤销/删除点（根据当前模式）。</li>
+                            <li>Space（按住）：与鼠标配合进行平移。</li>
+                        </ul>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>

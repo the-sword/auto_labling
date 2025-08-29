@@ -7,6 +7,18 @@ let isDraggingVertex = false;      // 是否在拖拽多边形顶点
 let draggingVertexIndex = -1;      // 被拖拽的顶点索引
 let lastResultImageBase64 = null;  // 最近一次结果图像（用于重绘）
 
+// 视图变换（缩放/平移）
+let viewScale = 1;
+let viewOffsetX = 0;
+let viewOffsetY = 0;
+let isPanning = false;
+let lastPanClient = { x: 0, y: 0 };
+let spacePressed = false;
+
+// 离屏底图（减少频繁重绘导致的闪烁）
+let baseRenderCanvas = document.createElement('canvas');
+let baseRenderReady = false;
+
 // DOM元素
 const uploadArea = document.getElementById('uploadArea');
 const imageInput = document.getElementById('imageInput');
@@ -27,6 +39,8 @@ const detectionsList = document.getElementById('detectionsList');
 const loadingOverlay = document.getElementById('loadingOverlay');
 const errorModal = new bootstrap.Modal(document.getElementById('errorModal'));
 const annotateToggleBtn = document.getElementById('annotateToggleBtn');
+const helpBtn = document.getElementById('helpBtn');
+const helpModal = new bootstrap.Modal(document.getElementById('helpModal'));
 
 // 手动标注状态
 let isAnnotating = false;
@@ -133,6 +147,10 @@ function initializeEventListeners() {
     // 手动标注开关
     if (annotateToggleBtn) {
         annotateToggleBtn.addEventListener('click', toggleAnnotationMode);
+    }
+    // 帮助按钮
+    if (helpBtn) {
+        helpBtn.addEventListener('click', () => helpModal.show());
     }
 }
 
@@ -286,7 +304,10 @@ function displayResults(imageSrc, detections) {
 
     // 绘制分割结果
     lastResultImageBase64 = imageSrc;
-    drawSegmentationResult(imageSrc, detections);
+    baseRenderReady = false;
+    buildBaseLayer(imageSrc, detections).then(() => {
+        drawFromBaseLayer();
+    });
 
     // 显示检测结果列表
     displayDetectionsList(detections);
@@ -299,8 +320,8 @@ function displayResults(imageSrc, detections) {
     enableCanvasInteractions();
 }
 
-// 绘制分割结果
-async function drawSegmentationResult(imageSrc, detections) {
+// 构建离屏底图（图像 + mask + bbox + label + 非高亮多边形）
+async function buildBaseLayer(imageSrc, detections) {
     const canvas = resultCanvas;
     const ctx = canvas.getContext('2d');
 
@@ -313,9 +334,17 @@ async function drawSegmentationResult(imageSrc, detections) {
 
     try {
         const mainImage = await loadImage(`data:image/png;base64,${imageSrc}`);
+        // 调整主canvas尺寸
         canvas.width = mainImage.width;
         canvas.height = mainImage.height;
-        ctx.drawImage(mainImage, 0, 0);
+        // 准备离屏画布
+        baseRenderCanvas.width = mainImage.width;
+        baseRenderCanvas.height = mainImage.height;
+        const bctx = baseRenderCanvas.getContext('2d');
+        // 清空离屏
+        bctx.setTransform(1, 0, 0, 1, 0, 0);
+        bctx.clearRect(0, 0, baseRenderCanvas.width, baseRenderCanvas.height);
+        bctx.drawImage(mainImage, 0, 0);
 
         for (let idx = 0; idx < detections.length; idx++) {
             const detection = detections[idx];
@@ -350,61 +379,89 @@ async function drawSegmentationResult(imageSrc, detections) {
                     }
                 }
                 tempCtx.putImageData(maskData, 0, 0);
-                ctx.drawImage(tempCanvas, 0, 0);
+                bctx.drawImage(tempCanvas, 0, 0);
             } else if (Array.isArray(detection.polygon) && detection.polygon.length > 2) {
                 // 无mask但有多边形（手动标注）：填充半透明区域
-                ctx.save();
-                ctx.beginPath();
+                bctx.save();
+                bctx.beginPath();
                 detection.polygon.forEach((pt, i) => {
-                    if (i === 0) ctx.moveTo(pt[0], pt[1]);
-                    else ctx.lineTo(pt[0], pt[1]);
+                    if (i === 0) bctx.moveTo(pt[0], pt[1]);
+                    else bctx.lineTo(pt[0], pt[1]);
                 });
-                ctx.closePath();
-                ctx.fillStyle = `rgba(${colorRgb.r}, ${colorRgb.g}, ${colorRgb.b}, 0.35)`;
-                ctx.fill();
-                ctx.restore();
+                bctx.closePath();
+                bctx.fillStyle = `rgba(${colorRgb.r}, ${colorRgb.g}, ${colorRgb.b}, 0.35)`;
+                bctx.fill();
+                bctx.restore();
             }
 
             // 无论是否有mask，都绘制bbox与标签
             if (detection.box) {
                 const box = detection.box;
-                ctx.strokeStyle = colorHex;
-                ctx.lineWidth = 2;
-                ctx.strokeRect(box.xmin, box.ymin, box.xmax - box.xmin, box.ymax - box.ymin);
+                bctx.strokeStyle = colorHex;
+                bctx.lineWidth = 2;
+                bctx.strokeRect(box.xmin, box.ymin, box.xmax - box.xmin, box.ymax - box.ymin);
 
-                ctx.fillStyle = colorHex;
-                ctx.font = '14px Arial';
+                bctx.fillStyle = colorHex;
+                bctx.font = '14px Arial';
                 const scoreText = typeof detection.score === 'number' ? detection.score.toFixed(2) : '1.00';
-                ctx.fillText(`${detection.label}: ${scoreText}`, box.xmin, Math.max(12, box.ymin - 5));
+                bctx.fillText(`${detection.label}: ${scoreText}`, box.xmin, Math.max(12, box.ymin - 5));
             }
 
             // 画多边形轮廓（如果有）
             if (Array.isArray(detection.polygon) && detection.polygon.length > 2) {
-                const isSelected = idx === selectedDetectionIndex;
-                ctx.save();
-                ctx.beginPath();
-                ctx.lineWidth = isSelected ? 3 : 2;
-                ctx.strokeStyle = isSelected ? '#00E0FF' : '#00FF88';
+                bctx.save();
+                bctx.beginPath();
+                bctx.lineWidth = 2;
+                bctx.strokeStyle = '#00FF88';
                 detection.polygon.forEach((pt, i) => {
-                    if (i === 0) ctx.moveTo(pt[0], pt[1]);
-                    else ctx.lineTo(pt[0], pt[1]);
+                    if (i === 0) bctx.moveTo(pt[0], pt[1]);
+                    else bctx.lineTo(pt[0], pt[1]);
                 });
-                ctx.closePath();
-                ctx.stroke();
-
-                // 选中时画可拖拽的顶点
-                if (isSelected) {
-                    for (const pt of detection.polygon) {
-                        drawHandle(ctx, pt[0], pt[1]);
-                    }
-                }
-                ctx.restore();
+                bctx.closePath();
+                bctx.stroke();
+                bctx.restore();
             }
         }
+        baseRenderReady = true;
     } catch (error) {
         console.error('Failed to draw segmentation result:', error);
         showError('Failed to render segmentation masks.');
     }
+}
+
+// 将离屏底图绘制到可视canvas，并叠加选中/预览层
+function drawFromBaseLayer() {
+    const canvas = resultCanvas;
+    if (!canvas || !baseRenderReady) return;
+    const ctx = canvas.getContext('2d');
+    // 清屏并设置当前视图变换
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(viewScale, 0, 0, viewScale, viewOffsetX, viewOffsetY);
+    ctx.drawImage(baseRenderCanvas, 0, 0);
+    // 选中目标的高亮与句柄
+    if (selectedDetectionIndex != null && detectionResults[selectedDetectionIndex] && Array.isArray(detectionResults[selectedDetectionIndex].polygon)) {
+        const det = detectionResults[selectedDetectionIndex];
+        const poly = det.polygon;
+        const isValid = Array.isArray(poly) && poly.length > 2;
+        if (isValid) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#00E0FF';
+            poly.forEach((pt, i) => {
+                if (i === 0) ctx.moveTo(pt[0], pt[1]);
+                else ctx.lineTo(pt[0], pt[1]);
+            });
+            ctx.closePath();
+            ctx.stroke();
+            // 句柄
+            for (const [x, y] of poly) drawHandle(ctx, x, y);
+            ctx.restore();
+        }
+    }
+    // 复位
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 // 显示检测结果列表
@@ -503,15 +560,33 @@ function enableCanvasInteractions() {
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width;
         const scaleY = canvas.height / rect.height;
+        // 先转到画布坐标，再反变换视图缩放和平移
+        const cx = (evt.clientX - rect.left) * scaleX;
+        const cy = (evt.clientY - rect.top) * scaleY;
         return {
-            x: (evt.clientX - rect.left) * scaleX,
-            y: (evt.clientY - rect.top) * scaleY
+            x: (cx - viewOffsetX) / viewScale,
+            y: (cy - viewOffsetY) / viewScale
         };
     };
 
     canvas.onmousedown = (evt) => {
         const pos = getCanvasPos(evt);
+        // 开始平移（按住空格 + 左键，或中键）
+        if ((spacePressed && evt.button === 0) || evt.button === 1) {
+            isPanning = true;
+            lastPanClient = { x: evt.clientX, y: evt.clientY };
+            return;
+        }
         if (isAnnotating) {
+            // Alt+点击顶点 -> 删除该点
+            if (evt.altKey && annotationPoints.length > 0) {
+                const vIdx = findNearbyVertex(annotationPoints, pos.x, pos.y, 8);
+                if (vIdx !== -1) {
+                    annotationPoints.splice(vIdx, 1);
+                    redrawWithAnnotation();
+                    return;
+                }
+            }
             // 添加一个顶点
             annotationPoints.push([Math.round(pos.x), Math.round(pos.y)]);
             redrawWithAnnotation();
@@ -521,6 +596,24 @@ function enableCanvasInteractions() {
         if (selectedDetectionIndex == null) return;
         const det = detectionResults[selectedDetectionIndex];
         if (!det || !Array.isArray(det.polygon)) return;
+
+        // Alt+点击已存在多边形的顶点 -> 删除该点（编辑已有分割）
+        if (evt.altKey) {
+            const vIdx = findNearbyVertex(det.polygon, pos.x, pos.y, 8);
+            if (vIdx !== -1) {
+                if (det.polygon.length <= 3) {
+                    showError('多边形至少需要3个点');
+                    return;
+                }
+                det.polygon.splice(vIdx, 1);
+                // 更新bbox
+                updateBoxFromPolygon(det);
+                // 变更需要重建底图
+                baseRenderReady = false;
+                buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
+                return;
+            }
+        }
 
         // 先检测是否点中某个顶点
         const vIdx = findNearbyVertex(det.polygon, pos.x, pos.y, 8);
@@ -541,6 +634,19 @@ function enableCanvasInteractions() {
     };
 
     canvas.onmousemove = (evt) => {
+        if (isPanning) {
+            const dx = evt.clientX - lastPanClient.x;
+            const dy = evt.clientY - lastPanClient.y;
+            lastPanClient = { x: evt.clientX, y: evt.clientY };
+            // 平移以屏幕像素为基准 -> 转为画布像素（考虑当前canvas缩放到CSS显示的比例）
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            viewOffsetX += dx * scaleX;
+            viewOffsetY += dy * scaleY;
+            redrawWithAnnotation(evt, getCanvasPos);
+            return;
+        }
         if (isAnnotating) {
             // 预览最后一个点到鼠标位置的线段
             redrawWithAnnotation(evt, getCanvasPos);
@@ -557,43 +663,111 @@ function enableCanvasInteractions() {
     };
 
     const endDrag = () => {
+        const wasDraggingVertex = isDraggingVertex;
         isDraggingVertex = false;
         draggingVertexIndex = -1;
+        isPanning = false;
+        // 拖拽顶点结束后，更新bbox并重建底图，避免底图中的旧轮廓与当前不一致
+        if (wasDraggingVertex && selectedDetectionIndex != null) {
+            const det = detectionResults[selectedDetectionIndex];
+            if (det && Array.isArray(det.polygon)) {
+                updateBoxFromPolygon(det);
+                baseRenderReady = false;
+                buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
+            }
+        }
     };
     canvas.onmouseup = endDrag;
     canvas.onmouseleave = endDrag;
+
+    // 缩放（滚轮缩放到光标处）
+    canvas.onwheel = (evt) => {
+        if (!isAnnotating) return; // 只在标注模式下启用缩放
+        evt.preventDefault();
+        const delta = -Math.sign(evt.deltaY); // 上滚放大，下滚缩小
+        const zoomFactor = 1 + (0.12 * delta);
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const cx = (evt.clientX - rect.left) * scaleX;
+        const cy = (evt.clientY - rect.top) * scaleY;
+        const worldX = (cx - viewOffsetX) / viewScale;
+        const worldY = (cy - viewOffsetY) / viewScale;
+        // 应用缩放
+        const newScale = Math.min(8, Math.max(0.2, viewScale * zoomFactor));
+        // 保持鼠标处的世界坐标在屏幕位置不变：调整偏移
+        viewOffsetX = cx - worldX * newScale;
+        viewOffsetY = cy - worldY * newScale;
+        viewScale = newScale;
+        redrawWithAnnotation(evt, getCanvasPos);
+    };
 
     // 双击完成标注
     canvas.ondblclick = () => {
         if (isAnnotating) finishAnnotation();
     };
 
-    // 键盘事件：Enter完成，Esc取消，Backspace撤销
+    // 键盘事件：
     document.onkeydown = (e) => {
-        if (!isAnnotating) return;
-        if (e.key === 'Enter') {
-            finishAnnotation();
-        } else if (e.key === 'Escape') {
-            cancelAnnotation();
-        } else if (e.key === 'Backspace' || e.key === 'Delete') {
-            if (annotationPoints.length > 0) {
-                annotationPoints.pop();
-                redrawWithAnnotation();
+        // 在输入框/文本域/可编辑区域中不拦截
+        const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+        const isEditable = (e.target && (e.target.isContentEditable || tag === 'input' || tag === 'textarea'));
+        // '?' 打开帮助（Shift + '/'）
+        if (!isEditable && (e.key === '?' || (e.shiftKey && e.key === '/'))) {
+            helpModal && helpModal.show();
+            e.preventDefault();
+            return;
+        }
+        if (isAnnotating) {
+            if (e.key === 'Enter') {
+                finishAnnotation();
+            } else if (e.key === 'Escape') {
+                cancelAnnotation();
+            } else if (e.key === 'Backspace' || e.key === 'Delete') {
+                if (annotationPoints.length > 0) {
+                    annotationPoints.pop();
+                    redrawWithAnnotation();
+                }
+                e.preventDefault();
+            } else if (e.code === 'Space') {
+                spacePressed = true;
+                e.preventDefault();
+            }
+            return;
+        }
+        // 非标注模式：若选中已有多边形，支持 Backspace/Delete 删除最后一个点
+        if (selectedDetectionIndex != null && (e.key === 'Backspace' || e.key === 'Delete')) {
+            const det = detectionResults[selectedDetectionIndex];
+            if (det && Array.isArray(det.polygon) && det.polygon.length > 3) {
+                det.polygon.pop();
+                updateBoxFromPolygon(det);
+                baseRenderReady = false;
+                buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
+            } else {
+                showError('多边形至少需要3个点');
             }
             e.preventDefault();
+        } else if (e.code === 'Space') {
+            spacePressed = true;
+            e.preventDefault();
         }
+    };
+    document.onkeyup = (e) => {
+        if (e.code === 'Space') spacePressed = false;
     };
 }
 
 function redraw() {
     if (!lastResultImageBase64) return;
-    drawSegmentationResult(lastResultImageBase64, detectionResults);
+    drawFromBaseLayer();
 }
 
 function redrawWithAnnotation(evt, getCanvasPos) {
-    redraw();
+    drawFromBaseLayer();
     const ctx = resultCanvas.getContext('2d');
     if (!ctx || annotationPoints.length === 0) return;
+    // 应用当前视图变换，在其上预览
+    ctx.setTransform(viewScale, 0, 0, viewScale, viewOffsetX, viewOffsetY);
     ctx.save();
     ctx.strokeStyle = '#FFA500';
     ctx.fillStyle = 'rgba(255,165,0,0.15)';
@@ -613,6 +787,8 @@ function redrawWithAnnotation(evt, getCanvasPos) {
     // 画点句柄
     for (const [x, y] of annotationPoints) drawHandle(ctx, x, y);
     ctx.restore();
+    // 复位
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 function toggleAnnotationMode() {
@@ -626,6 +802,10 @@ function toggleAnnotationMode() {
     annotateToggleBtn.innerHTML = isAnnotating
         ? '<i class="fas fa-draw-polygon"></i> 退出标注模式'
         : '<i class="fas fa-draw-polygon"></i> 手动标注模式';
+    // 进入标注模式时重置视图到居中1x；退出时也复位
+    viewScale = 1;
+    viewOffsetX = 0;
+    viewOffsetY = 0;
     redraw();
 }
 
@@ -653,7 +833,9 @@ function finishAnnotation() {
     annotationPoints = [];
     annotateToggleBtn.classList.remove('active');
     annotateToggleBtn.innerHTML = '<i class="fas fa-draw-polygon"></i> 手动标注模式';
-    redraw();
+    // 新增的手动标注需要体现在底图
+    baseRenderReady = false;
+    buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
 }
 
 function cancelAnnotation() {
@@ -696,6 +878,19 @@ function pointInPolygon(x, y, polygon) {
     return inside;
 }
 
+// 根据多边形更新bbox
+function updateBoxFromPolygon(det) {
+    if (!det || !Array.isArray(det.polygon) || det.polygon.length < 3) return;
+    const xs = det.polygon.map(p => p[0]);
+    const ys = det.polygon.map(p => p[1]);
+    det.box = {
+        xmin: Math.min(...xs),
+        ymin: Math.min(...ys),
+        xmax: Math.max(...xs),
+        ymax: Math.max(...ys)
+    };
+}
+
 function findDetectionAtPoint(x, y) {
     // 优先查找包含点的多边形
     for (let i = detectionResults.length - 1; i >= 0; i--) {
@@ -734,7 +929,9 @@ function editLabelInline(index) {
         const v = input.value.trim();
         if (v) detectionResults[index].label = v;
         displayDetectionsList(detectionResults);
-        redraw();
+        // 标签变更影响底图文字，重建底图
+        baseRenderReady = false;
+        buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
     };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); });
     input.addEventListener('blur', commit);
@@ -746,7 +943,8 @@ function deleteDetection(index) {
     if (selectedDetectionIndex === index) selectedDetectionIndex = null;
     if (selectedDetectionIndex > index) selectedDetectionIndex--;
     displayDetectionsList(detectionResults);
-    redraw();
+    baseRenderReady = false;
+    buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
 }
 
 // 页面加载完成后初始化
