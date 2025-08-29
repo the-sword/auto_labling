@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAM任意物体分割 - Grounded Segment Anything</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏 -->
+            <div class="col-md-3 sidebar">
+                <div class="sidebar-content">
+                    <h2 class="text-center mb-4">
+                        <i class="fas fa-magic"></i>
+                        SAM分割工具
+                    </h2>
+                    
+                    <!-- 图片上传区域 -->
+                    <div class="upload-section mb-4">
+                        <h5><i class="fas fa-image"></i> 上传图片</h5>
+                        <div class="upload-area" id="uploadArea">
+                            <div class="upload-content">
+                                <i class="fas fa-cloud-upload-alt fa-3x mb-3"></i>
+                                <p>点击或拖拽图片到此处</p>
+                                <input type="file" id="imageInput" accept="image/*" style="display: none;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 标签输入区域 -->
+                    <div class="labels-section mb-4">
+                        <h5><i class="fas fa-tags"></i> 目标标签</h5>
+                        <div class="input-group mb-2">
+                            <input type="text" class="form-control" id="labelInput" placeholder="输入标签，如：cat, dog">
+                            <button class="btn btn-outline-primary" type="button" id="addLabelBtn">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
+                        <div id="labelsList" class="labels-list"></div>
+                    </div>
+
+                    <!-- 参数设置 -->
+                    <div class="settings-section mb-4">
+                        <h5><i class="fas fa-cog"></i> 参数设置</h5>
+                        <div class="mb-3">
+                            <label for="thresholdSlider" class="form-label">检测阈值: <span id="thresholdValue">0.3</span></label>
+                            <input type="range" class="form-range" id="thresholdSlider" min="0.1" max="0.9" step="0.1" value="0.3">
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="polygonRefinement" checked>
+                            <label class="form-check-label" for="polygonRefinement">
+                                多边形优化
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 操作按钮 -->
+                    <div class="actions-section">
+                        <button class="btn btn-primary w-100 mb-2" id="segmentBtn" disabled>
+                            <i class="fas fa-play"></i> 开始分割
+                        </button>
+                        <button class="btn btn-outline-secondary w-100" id="clearBtn">
+                            <i class="fas fa-trash"></i> 清除结果
+                        </button>
+                    </div>
+
+                    <!-- 示例标签 -->
+                    <div class="examples-section mt-4">
+                        <h6><i class="fas fa-lightbulb"></i> 示例标签</h6>
+                        <div class="example-tags">
+                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">cat</span>
+                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">dog</span>
+                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">person</span>
+                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">car</span>
+                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">chair</span>
+                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">table</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 主内容区域 -->
+            <div class="col-md-9 main-content">
+                <div class="content-wrapper">
+                    <!-- 图片显示区域 -->
+                    <div class="image-section mb-4">
+                        <div class="image-container" id="imageContainer">
+                            <div class="placeholder-text">
+                                <i class="fas fa-image fa-4x mb-3"></i>
+                                <h4>请上传图片开始分割</h4>
+                                <p class="text-muted">支持JPG、PNG等常见图片格式</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 结果显示区域 -->
+                    <div class="results-section" id="resultsSection" style="display: none;">
+                        <h5><i class="fas fa-chart-bar"></i> 分割结果</h5>
+                        <div class="results-container">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>原图</h6>
+                                    <div class="result-image-container">
+                                        <img id="originalImage" class="result-image" alt="原图">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>分割结果</h6>
+                                    <div class="result-image-container">
+                                        <canvas id="resultCanvas" class="result-image"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 检测结果列表 -->
+                        <div class="detections-list mt-3" id="detectionsList"></div>
+                    </div>
+
+                    <!-- 加载状态 -->
+                    <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+                        <div class="loading-content">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-3">正在处理中，请稍候...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 错误提示模态框 -->
+    <div class="modal fade" id="errorModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-exclamation-triangle text-danger"></i> 错误
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="errorMessage">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
