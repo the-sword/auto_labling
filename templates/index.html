@@ -88,14 +88,6 @@
                         <button class="btn btn-primary w-100 mb-2" id="segmentBtn" disabled>
                             <i class="fas fa-play"></i> 开始分割
                         </button>
-                        <div class="d-flex gap-2 mb-2">
-                            <button class="btn btn-outline-secondary flex-fill" id="prevBtn" disabled>
-                                <i class="fas fa-arrow-left"></i> 上一张
-                            </button>
-                            <button class="btn btn-outline-secondary flex-fill" id="nextBtn" disabled>
-                                下一张 <i class="fas fa-arrow-right"></i>
-                            </button>
-                        </div>
                         <button class="btn btn-outline-success w-100 mb-2" id="batchBtn" disabled>
                             <i class="fas fa-layer-group"></i> 批量分割（对队列中所有图片）
                         </button>
@@ -142,6 +134,17 @@
             <!-- 主内容区域 -->
             <div class="col-md-9 main-content">
                 <div class="content-wrapper">
+                    <!-- 右侧导航按钮（保持 ID 与逻辑不变） -->
+                    <div class="top-controls d-flex justify-content-end align-items-center mb-3">
+                        <div class="btn-group" role="group" aria-label="Navigation">
+                            <button class="btn btn-outline-secondary" id="prevBtn" disabled>
+                                <i class="fas fa-arrow-left"></i> 上一张
+                            </button>
+                            <button class="btn btn-outline-secondary" id="nextBtn" disabled>
+                                下一张 <i class="fas fa-arrow-right"></i>
+                            </button>
+                        </div>
+                    </div>
                     <!-- 图片与分割结果并排显示区域 -->
                     <div class="image-section mb-4">
                         <div class="row">
