@@ -8,10 +8,100 @@ let draggingVertexIndex = -1;      // 被拖拽的顶点索引
 let lastResultImageBase64 = null;  // 最近一次结果图像（用于重绘）
 let hoveredDetectionIndex = null;  // 悬浮的分割结果索引（用于联动高亮）
 
+// 功能开关：检测列表与画布的悬浮联动
+const ENABLE_HOVER_LINK = false;
+
 // 多图队列
-let imageQueue = []; // [{ name, file, dataURL (lazy) }]
+let imageQueue = []; // [{ name, file, dataURL (lazy), relPath, serverPath, serverUrl }]
 let currentImageIndex = -1;
 let perImageResults = new Map(); // key: index, value: { detections, resultImageBase64 }
+
+// 上传图片文件到后台，更新队列条目的 serverPath/serverUrl
+async function uploadFiles(files) {
+    if (!files || files.length === 0) return;
+    const formData = new FormData();
+    const rels = [];
+    for (const f of files) {
+        formData.append('files', f);
+        const rp = (f.webkitRelativePath && f.webkitRelativePath.length > 0) ? f.webkitRelativePath : f.name;
+        rels.push(rp);
+    }
+    // 并行传递相对路径，后端按顺序对应
+    for (const rp of rels) formData.append('relative_paths', rp);
+    showLoading(true);
+    try {
+        const resp = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await resp.json();
+        if (!data.success) {
+            showError(data.error || '上传失败');
+            return;
+        }
+        // 以相对路径优先匹配，写回队列项
+        const returned = data.files || [];
+        for (const item of returned) {
+            const retRel = item.path || item.rel_path || '';
+            let q = imageQueue.find(qi => qi.relPath === retRel);
+            if (!q) {
+                // 回退到按名称匹配（可能有同名风险）
+                q = imageQueue.find(qi => qi.name === item.name && !qi.serverPath);
+            }
+            if (q) {
+                q.serverPath = item.path; // 相对 uploads/
+                q.serverUrl = item.url;   // /uploads/<name>
+            }
+        }
+        // 可能影响保存按钮状态
+        updateSegmentButton();
+    } catch (err) {
+        showError('上传失败: ' + (err?.message || err));
+    } finally {
+        showLoading(false);
+    }
+}
+
+// 保存当前图片的分割结果到后台
+async function saveCurrentResults() {
+    const item = imageQueue[currentImageIndex] || null;
+    if (!item || !item.serverPath || !Array.isArray(detectionResults) || detectionResults.length === 0) {
+        showError('无可保存的结果或图片未上传到服务器');
+        return;
+    }
+    showLoading(true);
+    try {
+        const resp = await fetch('/api/save_result', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_path: item.serverPath,
+                detections: detectionResults,
+                params: {
+                    threshold: parseFloat(thresholdSlider.value),
+                    polygon_refinement: polygonRefinement.checked,
+                    mask_iou_threshold: maskIouSlider ? parseFloat(maskIouSlider.value) : 0.5,
+                    polygon_simplify_epsilon: polyEpsSlider ? parseFloat(polyEpsSlider.value) : 2.0,
+                    polygon_collinear_epsilon: polyCollinearSlider ? parseFloat(polyCollinearSlider.value) : 1.0
+                },
+                save_subdir: (typeof saveSubdirInput !== 'undefined' && saveSubdirInput) ? (saveSubdirInput.value || '') : ''
+            })
+        });
+        const data = await resp.json();
+        if (!data.success) {
+            showError(data.error || '保存失败');
+            return;
+        }
+        // 简单提示
+        alert('保存成功');
+    } catch (err) {
+        showError('保存失败: ' + (err?.message || err));
+    } finally {
+        showLoading(false);
+        // 保存后再次刷新保存按钮（保持一致）
+        updateSegmentButton();
+    }
+}
 
 // 在画布上绘制带圆角背景的文本，提升可读性
 function drawTextWithBackground(ctx, text, x, y, options = {}) {
@@ -70,6 +160,11 @@ function drawTextWithBackground(ctx, text, x, y, options = {}) {
 function updateDetectionListHover() {
     if (!detectionsList) return;
     const items = detectionsList.querySelectorAll('.detection-item');
+    if (!ENABLE_HOVER_LINK) {
+        // 关闭联动：移除所有 hovered 样式
+        items.forEach(el => el.classList.remove('hovered'));
+        return;
+    }
     items.forEach(el => {
         const idx = parseInt(el.getAttribute('data-index'));
         if (Number.isInteger(idx)) {
@@ -79,6 +174,7 @@ function updateDetectionListHover() {
 }
 
 function setHoveredDetection(index) {
+    if (!ENABLE_HOVER_LINK) return; // 关闭联动
     const next = (Number.isInteger(index) && index >= 0 && index < detectionResults.length) ? index : null;
     if (next === hoveredDetectionIndex) return;
     hoveredDetectionIndex = next;
@@ -129,6 +225,8 @@ const prevBtn = document.getElementById('prevBtn');
 const nextBtn = document.getElementById('nextBtn');
 const batchBtn = document.getElementById('batchBtn');
 const queueInfo = document.getElementById('queueInfo');
+const saveBtn = document.getElementById('saveBtn');
+const saveSubdirInput = document.getElementById('saveSubdirInput');
 
 // 手动标注状态
 let isAnnotating = false;
@@ -284,6 +382,7 @@ function initializeEventListeners() {
     if (prevBtn) prevBtn.addEventListener('click', () => navigateTo(currentImageIndex - 1));
     if (nextBtn) nextBtn.addEventListener('click', () => navigateTo(currentImageIndex + 1));
     if (batchBtn) batchBtn.addEventListener('click', runBatchSegmentation);
+    if (saveBtn) saveBtn.addEventListener('click', saveCurrentResults);
 
     // 手动标注开关
     if (annotateToggleBtn) {
@@ -294,8 +393,8 @@ function initializeEventListeners() {
         helpBtn.addEventListener('click', () => helpModal.show());
     }
 
-    // 结果列表悬浮联动（事件委托）
-    if (detectionsList) {
+    // 结果列表悬浮联动（事件委托）- 受开关控制
+    if (detectionsList && ENABLE_HOVER_LINK) {
         detectionsList.addEventListener('mouseover', (e) => {
             const item = e.target.closest('.detection-item');
             if (!item || !detectionsList.contains(item)) return;
@@ -332,15 +431,40 @@ function handleDrop(e) {
     e.preventDefault();
     uploadArea.classList.remove('dragover');
 
+    // 优先使用 entries 方式，以保留相对路径（目录拖拽）
+    const items = e.dataTransfer.items;
+    if (items && items.length) {
+        collectFilesFromDataTransfer(items).then((files) => {
+            const imageFiles = files.filter(f => (f.type && f.type.startsWith('image/')) || /\.(png|jpg|jpeg|bmp|gif|webp)$/i.test(f.name));
+            if (imageFiles.length === 0) {
+                showError('未检测到图片文件');
+                return;
+            }
+            setImageQueue(imageFiles);
+            uploadFiles(imageFiles).catch(err => console.error(err));
+        }).catch(err => {
+            console.warn('目录遍历失败，回退至 files 列表:', err);
+            const files = Array.from(e.dataTransfer.files || []);
+            const imageFiles = files.filter(f => f.type && f.type.startsWith('image/'));
+            if (imageFiles.length === 0) {
+                showError('未检测到图片文件');
+                return;
+            }
+            setImageQueue(imageFiles);
+            uploadFiles(imageFiles).catch(err2 => console.error(err2));
+        });
+        return;
+    }
+
+    // 回退：直接使用 files
     const files = Array.from(e.dataTransfer.files || []);
     const imageFiles = files.filter(f => f.type && f.type.startsWith('image/'));
-    if (imageFiles.length > 1) {
-        setImageQueue(imageFiles);
-    } else if (imageFiles.length === 1) {
-        setImageQueue(imageFiles);
-    } else {
+    if (imageFiles.length === 0) {
         showError('未检测到图片文件');
+        return;
     }
+    setImageQueue(imageFiles);
+    uploadFiles(imageFiles).catch(err => console.error(err));
 }
 
 // 图片选择处理
@@ -349,6 +473,7 @@ function handleImageSelect(e) {
     const imageFiles = files.filter(f => f.type && f.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
     setImageQueue(imageFiles);
+    uploadFiles(imageFiles).catch(err => console.error(err));
 }
 
 // 加载图片
@@ -374,12 +499,82 @@ function loadImageFromQueue(index) {
 }
 
 function setImageQueue(files) {
-    imageQueue = files.map(f => ({ name: f.name, file: f, dataURL: null }));
+    imageQueue = files.map(f => ({
+        name: f.name,
+        file: f,
+        dataURL: null,
+        relPath: (f.relativePath && f.relativePath.length > 0)
+            ? f.relativePath
+            : ((f.webkitRelativePath && f.webkitRelativePath.length > 0) ? f.webkitRelativePath : f.name)
+    }));
     currentImageIndex = 0;
     perImageResults.clear();
     updateQueueInfo();
     updateNavButtons();
     loadImageFromQueue(currentImageIndex);
+}
+
+// 递归收集 DataTransferItemList 中的文件，保留相对路径
+function collectFilesFromDataTransfer(items) {
+    return new Promise((resolve, reject) => {
+        const allFiles = [];
+        let pending = 0;
+
+        function readEntry(entry, pathPrefix) {
+            if (!entry) return;
+            if (entry.isFile) {
+                pending++;
+                entry.file(file => {
+                    // 附加相对路径属性
+                    const relPath = pathPrefix ? `${pathPrefix}/${file.name}` : file.name;
+                    try {
+                        Object.defineProperty(file, 'relativePath', { value: relPath, configurable: true });
+                    } catch (_) {
+                        file.relativePath = relPath;
+                    }
+                    allFiles.push(file);
+                    pending--;
+                    if (pending === 0) resolve(allFiles);
+                }, err => {
+                    pending--;
+                    console.warn('读取文件失败:', err);
+                    if (pending === 0) resolve(allFiles);
+                });
+            } else if (entry.isDirectory) {
+                const reader = entry.createReader();
+                function readEntries() {
+                    pending++;
+                    reader.readEntries(entries => {
+                        pending--;
+                        if (!entries || entries.length === 0) {
+                            if (pending === 0) resolve(allFiles);
+                            return;
+                        }
+                        for (const ent of entries) {
+                            readEntry(ent, pathPrefix ? `${pathPrefix}/${entry.name}` : entry.name);
+                        }
+                        // 继续读取该目录剩余条目
+                        readEntries();
+                    }, err => {
+                        console.warn('读取目录失败:', err);
+                        if (pending === 0) resolve(allFiles);
+                    });
+                }
+                readEntries();
+            }
+        }
+
+        try {
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+                if (entry) readEntry(entry, '');
+            }
+            if (pending === 0) resolve(allFiles);
+        } catch (e) {
+            reject(e);
+        }
+    });
 }
 
 function navigateTo(index) {
@@ -473,6 +668,12 @@ function updateLabelsDisplay() {
 function updateSegmentButton() {
     segmentBtn.disabled = !currentImage || currentLabels.length === 0;
     updateNavButtons();
+    // 同时更新保存按钮状态：需要当前有服务器路径且有检测结果
+    if (saveBtn) {
+        const item = imageQueue[currentImageIndex] || null;
+        const canSave = !!(item && item.serverPath && Array.isArray(detectionResults) && detectionResults.length > 0);
+        saveBtn.disabled = !canSave;
+    }
 }
 
 // 执行分割
@@ -496,21 +697,29 @@ async function performSegmentation() {
                 is_manual: true
             }));
 
+        // 优先使用服务器路径，避免重复上传图像数据
+        const queueItem = imageQueue[currentImageIndex] || {};
+        const payload = {
+            labels: currentLabels,
+            threshold: parseFloat(thresholdSlider.value),
+            polygon_refinement: polygonRefinement.checked,
+            mask_iou_threshold: maskIouSlider ? parseFloat(maskIouSlider.value) : 0.5,
+            polygon_simplify_epsilon: polyEpsSlider ? parseFloat(polyEpsSlider.value) : 2.0,
+            polygon_collinear_epsilon: polyCollinearSlider ? parseFloat(polyCollinearSlider.value) : 1.0,
+            manual_annotations: manualAnnotations
+        };
+        if (queueItem && queueItem.serverPath) {
+            payload.image_path = queueItem.serverPath;
+        } else {
+            payload.image = currentImage;
+        }
+
         const response = await fetch('/api/segment', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                image: currentImage,
-                labels: currentLabels,
-                threshold: parseFloat(thresholdSlider.value),
-                polygon_refinement: polygonRefinement.checked,
-                mask_iou_threshold: maskIouSlider ? parseFloat(maskIouSlider.value) : 0.5,
-                polygon_simplify_epsilon: polyEpsSlider ? parseFloat(polyEpsSlider.value) : 2.0,
-                polygon_collinear_epsilon: polyCollinearSlider ? parseFloat(polyCollinearSlider.value) : 1.0,
-                manual_annotations: manualAnnotations
-            })
+            body: JSON.stringify(payload)
         });
 
         const data = await response.json();
@@ -526,6 +735,8 @@ async function performSegmentation() {
                 });
                 updateQueueInfo();
             }
+            // 结果就绪后刷新按钮状态（启用保存按钮等）
+            updateSegmentButton();
         } else {
             showError(data.error || '分割失败');
         }

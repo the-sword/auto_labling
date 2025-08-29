@@ -14,7 +14,7 @@ import requests
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_from_directory, url_for
 from flask_cors import CORS
 from transformers import AutoModelForMaskGeneration, AutoProcessor, pipeline
 
@@ -25,6 +25,13 @@ CORS(app)
 object_detector = None
 segmentator = None
 processor = None
+
+# 持久化目录
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+RESULTS_FOLDER = os.path.join(BASE_DIR, 'results')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(RESULTS_FOLDER, exist_ok=True)
 
 @dataclass
 class BoundingBox:
@@ -217,6 +224,15 @@ def load_image(image_data: bytes) -> Image.Image:
     image = Image.open(io.BytesIO(image_data)).convert("RGB")
     return image
 
+def load_image_from_path(path: str) -> bytes:
+    """从磁盘路径读取文件字节（限制在UPLOAD_FOLDER内）"""
+    abs_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, path)) if not os.path.isabs(path) else os.path.abspath(path)
+    # 安全限制：必须在UPLOAD_FOLDER目录内
+    if not abs_path.startswith(os.path.abspath(UPLOAD_FOLDER)):
+        raise ValueError('Invalid image_path')
+    with open(abs_path, 'rb') as f:
+        return f.read()
+
 def detect(image: Image.Image, labels: List[str], threshold: float = 0.3) -> List[DetectionResult]:
     """使用Grounding DINO检测对象"""
     global object_detector
@@ -331,7 +347,14 @@ def segment_api():
     try:
         # 获取请求数据
         data = request.get_json()
-        image_data = base64.b64decode(data['image'].split(',')[1])
+        image_b64 = data.get('image')
+        image_path = data.get('image_path')  # 相对或绝对路径，首选相对 uploads 下
+        if image_b64:
+            image_data = base64.b64decode(image_b64.split(',')[1])
+        elif image_path:
+            image_data = load_image_from_path(image_path)
+        else:
+            return jsonify({'success': False, 'error': 'image or image_path is required'}), 400
         labels = data['labels']
         threshold = data.get('threshold', 0.3)
         polygon_refinement = data.get('polygon_refinement', True)
@@ -426,6 +449,182 @@ def segment_api():
 def health_check():
     """健康检查端点"""
     return jsonify({'status': 'healthy'})
+
+@app.route('/api/upload', methods=['POST'])
+def upload_api():
+    """上传图片（多文件）并保存至 uploads/，返回可访问的URL与相对路径。
+    - 当提供 form 字段 relative_paths 时，按相对路径保存（保留子目录结构），允许覆盖。
+    - 否则，沿用旧逻辑：随机后缀防重名，平铺保存。
+    """
+    if 'files' not in request.files:
+        return jsonify({'success': False, 'error': 'no files field'}), 400
+    files = request.files.getlist('files')
+    rel_list = request.form.getlist('relative_paths') or []
+    use_rel = len(rel_list) == len(files) and len(files) > 0
+
+    def sanitize_rel_path(p: str) -> str:
+        # 统一分隔符，去除首部斜杠并禁止上级目录
+        p = p.replace('\\', '/').lstrip('/')
+        # 移除 .. 片段
+        parts = [seg for seg in p.split('/') if seg not in ('', '.', '..')]
+        # 仅保留安全字符
+        safe_parts = []
+        for seg in parts:
+            safe = ''.join(c for c in seg if c.isalnum() or c in (' ', '.', '-', '_')).strip().replace(' ', '_')
+            if not safe:
+                safe = 'unnamed'
+            safe_parts.append(safe)
+        return '/'.join(safe_parts)
+
+    saved = []
+    for idx, f in enumerate(files):
+        if not f or not f.filename:
+            continue
+        name = f.filename
+        if use_rel:
+            rel_path = sanitize_rel_path(rel_list[idx] or name)
+            # 确保有文件名
+            if rel_path.endswith('/') or rel_path == '':
+                base = ''.join(c for c in name if c.isalnum() or c in (' ', '.', '-', '_')).strip().replace(' ', '_') or 'image.png'
+                rel_path = (rel_path.rstrip('/') + '/' if rel_path else '') + base
+            save_path = os.path.join(UPLOAD_FOLDER, rel_path)
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            f.save(save_path)
+            url = url_for('serve_uploads', filename=rel_path, _external=False)
+            saved.append({
+                'name': name,
+                'rel_path': rel_path,
+                'path': rel_path,
+                'url': url,
+                'size': os.path.getsize(save_path)
+            })
+        else:
+            # 旧逻辑：随机后缀，平铺
+            safe_name = ''.join(c for c in name if c.isalnum() or c in (' ', '.', '-', '_')).strip().replace(' ', '_')
+            stem, ext = os.path.splitext(safe_name)
+            suffix = str(random.randint(10000, 99999))
+            fname = f"{stem}_{suffix}{ext or '.png'}"
+            save_path = os.path.join(UPLOAD_FOLDER, fname)
+            f.save(save_path)
+            rel_path = fname
+            url = url_for('serve_uploads', filename=rel_path, _external=False)
+            saved.append({
+                'name': name,
+                'saved_name': fname,
+                'path': rel_path,
+                'url': url,
+                'size': os.path.getsize(save_path)
+            })
+    return jsonify({'success': True, 'files': saved})
+
+@app.route('/uploads/<path:filename>')
+def serve_uploads(filename):
+    """静态访问上传的文件"""
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+@app.route('/api/save_result', methods=['POST'])
+def save_result_api():
+    """保存分割结果：
+    - 允许指定 save_subdir（相对于 results/）
+    - 按 uploads 下的相对子目录结构保存（便于回溯）
+    - 复制原图到结果目录，并生成与原图同名的 Labelme 风格 JSON
+    """
+    try:
+        import shutil
+        data = request.get_json()
+        image_path = data.get('image_path')
+        detections = data.get('detections') or []
+        params = data.get('params') or {}
+        save_subdir = (data.get('save_subdir') or '').strip()
+        if not image_path:
+            return jsonify({'success': False, 'error': 'image_path required'}), 400
+        # 验证图像路径在 uploads 内
+        abs_image = os.path.abspath(os.path.join(UPLOAD_FOLDER, image_path)) if not os.path.isabs(image_path) else os.path.abspath(image_path)
+        if not abs_image.startswith(os.path.abspath(UPLOAD_FOLDER)) or not os.path.exists(abs_image):
+            return jsonify({'success': False, 'error': 'invalid image_path'}), 400
+
+        # 目的根目录
+        dest_root = RESULTS_FOLDER
+        if save_subdir:
+            # 清理子目录名
+            safe_sub = ''.join(c for c in save_subdir if c.isalnum() or c in (' ', '.', '-', '_', '/')).strip().replace(' ', '_')
+            safe_sub = safe_sub.replace('\\', '/').lstrip('/')
+            dest_root = os.path.join(RESULTS_FOLDER, safe_sub)
+
+        # 相对 uploads 的子路径
+        rel_subdir = os.path.dirname(image_path).replace('\\', '/')
+        dest_dir = os.path.join(dest_root, rel_subdir)
+        os.makedirs(dest_dir, exist_ok=True)
+
+        # 复制原图
+        img_basename = os.path.basename(abs_image)
+        dest_image_path = os.path.join(dest_dir, img_basename)
+        shutil.copyfile(abs_image, dest_image_path)
+
+        # 构造 Labelme JSON
+        # 读取图像尺寸与数据
+        with Image.open(abs_image) as im:
+            width, height = im.size
+            im_bytes_io = io.BytesIO()
+            im.save(im_bytes_io, format='JPEG' if im.format == 'JPEG' else 'PNG')
+            image_b64 = base64.b64encode(im_bytes_io.getvalue()).decode('utf-8')
+
+        # 解析 detections -> shapes（优先 polygon；如无则从 mask 还原多边形）
+        try:
+            poly_eps = float(params.get('polygon_simplify_epsilon', 2.0))
+        except Exception:
+            poly_eps = 2.0
+        try:
+            col_eps = float(params.get('polygon_collinear_epsilon', 1.0))
+        except Exception:
+            col_eps = 1.0
+
+        shapes = []
+        for det in detections:
+            label = str(det.get('label', 'object'))
+            polygon = det.get('polygon')
+            if (not polygon or len(polygon) < 3) and det.get('mask'):
+                try:
+                    mask_b64 = det['mask']
+                    mask_bytes = base64.b64decode(mask_b64)
+                    m = Image.open(io.BytesIO(mask_bytes)).convert('L')
+                    mask_np = np.array(m) > 0
+                    poly = mask_to_polygon(mask_np.astype(np.uint8), epsilon=poly_eps, collinear_eps=col_eps)
+                    polygon = poly
+                except Exception:
+                    polygon = []
+            if not polygon or len(polygon) < 3:
+                # 跳过无效多边形
+                continue
+            shapes.append({
+                'mask': None,
+                'label': label,
+                'points': [[float(p[0]), float(p[1])] for p in polygon],
+                'group_id': None,
+                'description': '',
+                'shape_type': 'polygon',
+                'flags': {}
+            })
+
+        labelme_payload = {
+            'version': '5.3.1',
+            'flags': {},
+            'shapes': shapes,
+            'imagePath': img_basename,
+            'imageData': image_b64,
+            'imageHeight': int(height),
+            'imageWidth': int(width)
+        }
+
+        stem = os.path.splitext(img_basename)[0]
+        json_path = os.path.join(dest_dir, f'{stem}.json')
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(labelme_payload, f, ensure_ascii=False)
+
+        result_rel = os.path.relpath(json_path, RESULTS_FOLDER)
+        return jsonify({'success': True, 'result_path': result_rel})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 def signal_handler(sig, frame):
     """处理终止信号，确保应用程序正确关闭"""

@@ -135,7 +135,7 @@
             <div class="col-md-9 main-content">
                 <div class="content-wrapper">
                     <!-- 右侧导航按钮（保持 ID 与逻辑不变） -->
-                    <div class="top-controls d-flex justify-content-end align-items-center mb-3">
+                    <div class="top-controls d-flex justify-content-end align-items-center gap-2 mb-3">
                         <div class="btn-group" role="group" aria-label="Navigation">
                             <button class="btn btn-outline-secondary" id="prevBtn" disabled>
                                 <i class="fas fa-arrow-left"></i> 上一张
@@ -144,6 +144,13 @@
                                 下一张 <i class="fas fa-arrow-right"></i>
                             </button>
                         </div>
+                        <div class="input-group" style="max-width: 320px;">
+                            <span class="input-group-text"><i class="fas fa-folder-open"></i></span>
+                            <input type="text" class="form-control" id="saveSubdirInput" placeholder="保存子目录（可选）">
+                        </div>
+                        <button class="btn btn-success" id="saveBtn" disabled>
+                            <i class="fas fa-save"></i> 保存结果
+                        </button>
                     </div>
                     <!-- 图片与分割结果并排显示区域 -->
                     <div class="image-section mb-4">
