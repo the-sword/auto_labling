@@ -482,6 +482,8 @@ def crawl_api():
 
         os.makedirs(out_dir, exist_ok=True)
 
+        # 新任务开始前清除停止标记
+        crawler.clear_stop()
         result = crawler.crawl_images(engine=engine, query=query, limit=limit, out_dir=out_dir)
         # 为前端提供相对 results 路径，便于展示
         try:
@@ -491,6 +493,15 @@ def crawl_api():
         result['out_dir'] = out_dir
         result['out_dir_rel'] = rel_to_results
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/crawl/stop', methods=['POST'])
+def crawl_stop_api():
+    """请求停止当前爬虫任务（若在进行中）"""
+    try:
+        crawler.request_stop()
+        return jsonify({'success': True, 'message': '已请求停止'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -623,7 +634,7 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
-        app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
+        app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False, threaded=True)
     except KeyboardInterrupt:
         print('\n接收到键盘中断，正在关闭...')
         # 确保资源被释放

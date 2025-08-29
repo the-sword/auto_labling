@@ -29,9 +29,39 @@ let perImageResults = new Map(); // key: index, value: { detections, resultImage
 // ============ 图片爬虫（页签） ============
 function initCrawlPage() {
     const startBtn = document.getElementById('crawlPageStartBtn');
+    const stopBtn = document.getElementById('crawlPageStopBtn');
     if (!startBtn) return;
     if (startBtn.dataset.bound === '1') return; // 防止重复绑定
     startBtn.dataset.bound = '1';
+
+    const setRunning = (running) => {
+        if (running) {
+            startBtn.disabled = true;
+            startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 正在爬取…';
+            if (stopBtn) stopBtn.disabled = false;
+        } else {
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<i class="fas fa-download"></i> 开始爬取';
+            if (stopBtn) stopBtn.disabled = true;
+        }
+    };
+
+    // 停止按钮
+    if (stopBtn && !stopBtn.dataset.bound) {
+        stopBtn.dataset.bound = '1';
+        stopBtn.addEventListener('click', async () => {
+            try {
+                stopBtn.disabled = true; // 防抖
+                await fetch('/api/crawl/stop', { method: 'POST' });
+                const statusBox = document.getElementById('crawlPageStatus');
+                if (statusBox) statusBox.textContent = '已请求停止，稍候…';
+            } catch (e) {
+                console.error(e);
+            } finally {
+                // 等待服务端响应主任务完成后，startBtn逻辑会复位
+            }
+        });
+    }
 
     startBtn.addEventListener('click', async () => {
         const queryInput = document.getElementById('crawlPageQuery');
@@ -48,28 +78,33 @@ function initCrawlPage() {
             showError('请输入关键词');
             return;
         }
-        startBtn.disabled = true;
-        startBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>爬取中...';
-        if (statusBox) statusBox.textContent = '';
+        setRunning(true);
+        if (statusBox) statusBox.textContent = '进行中…';
+
         try {
             const resp = await fetch('/api/crawl', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query, engine, limit, out_dir: outDir })
+                body: JSON.stringify({
+                    query,
+                    engine,
+                    limit,
+                    out_dir: outDir
+                })
             });
             const data = await resp.json();
             if (!data.success) {
                 showError(data.error || '爬取失败');
                 return;
             }
-            const msg = `已保存 ${data.saved_count}/${data.found} 张至: ${data.out_dir_rel || data.out_dir}`;
+            const stoppedMsg = data.stopped ? '（已停止）' : '';
+            const msg = `已保存 ${data.saved_count}/${data.found} 张至: ${data.out_dir_rel || data.out_dir} ${stoppedMsg}`.trim();
             if (statusBox) statusBox.textContent = msg;
-            showSuccess('爬取完成');
+            showSuccess(data.stopped ? '已停止' : '爬取完成');
         } catch (e) {
             showError('网络错误：' + (e?.message || e));
         } finally {
-            startBtn.disabled = false;
-            startBtn.innerHTML = '<i class="fas fa-download"></i> 开始爬取';
+            setRunning(false);
         }
     });
 }

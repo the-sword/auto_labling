@@ -2,6 +2,7 @@ import os
 import re
 import time
 import random
+import threading
 from typing import List, Tuple, Dict
 
 import requests
@@ -15,6 +16,17 @@ USER_AGENT = (
 HEADERS = {"User-Agent": USER_AGENT, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"}
 TIMEOUT = 12
 
+
+# 全局停止事件，供外部控制停止爬取
+STOP_EVENT = threading.Event()
+
+def request_stop():
+    """请求停止当前爬取任务"""
+    STOP_EVENT.set()
+
+def clear_stop():
+    """清除停止标记，在新任务开始前调用"""
+    STOP_EVENT.clear()
 
 def sanitize_filename(name: str) -> str:
     name = name.strip().replace(" ", "_")
@@ -125,6 +137,9 @@ def crawl_images(engine: str, query: str, limit: int, out_dir: str) -> Dict:
     saved = []
     base = sanitize_filename(query) or "images"
     for idx, u in enumerate(urls, start=1):
+        # 支持外部停止
+        if STOP_EVENT.is_set():
+            break
         ext = os.path.splitext(u.split("?")[0])[1].lower()
         if ext not in [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]:
             ext = ".jpg"
@@ -134,7 +149,11 @@ def crawl_images(engine: str, query: str, limit: int, out_dir: str) -> Dict:
         if ok:
             saved.append({"url": u, "path": path})
         # small polite delay
-        time.sleep(random.uniform(0.2, 0.6))
+        # 停止检查 + 延时
+        for _ in range(3):
+            if STOP_EVENT.is_set():
+                break
+            time.sleep(random.uniform(0.05, 0.1))
 
     return {
         "success": True,
@@ -144,4 +163,5 @@ def crawl_images(engine: str, query: str, limit: int, out_dir: str) -> Dict:
         "found": len(urls),
         "saved_count": len(saved),
         "saved": saved,
+        "stopped": STOP_EVENT.is_set(),
     }
