@@ -432,11 +432,124 @@ def segment_api():
         buffer = io.BytesIO()
         image_pil.save(buffer, format='PNG')
         image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        
+        # 自动保存原图和JSON文件
+        save_result = None
+        if image_path:
+            try:
+                # 准备保存参数
+                save_params = {
+                    'image_path': image_path,
+                    'detections': results,
+                    'params': {
+                        'threshold': threshold,
+                        'polygon_refinement': polygon_refinement,
+                        'mask_iou_threshold': mask_iou_threshold,
+                        'polygon_simplify_epsilon': poly_simplify_eps,
+                        'polygon_collinear_epsilon': poly_collinear_eps
+                    },
+                    'save_subdir': 'auto_save'  # 自动保存到 results/auto_save 目录
+                }
+                
+                # 调用保存逻辑
+                import shutil
+                image_path = save_params.get('image_path')
+                detections = save_params.get('detections') or []
+                params = save_params.get('params') or {}
+                save_subdir = (save_params.get('save_subdir') or '').strip()
+                
+                # 验证图像路径在 uploads 内
+                abs_image = os.path.abspath(os.path.join(UPLOAD_FOLDER, image_path)) if not os.path.isabs(image_path) else os.path.abspath(image_path)
+                if abs_image.startswith(os.path.abspath(UPLOAD_FOLDER)) and os.path.exists(abs_image):
+                    # 目的根目录
+                    dest_root = RESULTS_FOLDER
+                    if save_subdir:
+                        # 清理子目录名
+                        safe_sub = ''.join(c for c in save_subdir if c.isalnum() or c in (' ', '.', '-', '_', '/')).strip().replace(' ', '_')
+                        safe_sub = safe_sub.replace('\\', '/').lstrip('/')
+                        dest_root = os.path.join(RESULTS_FOLDER, safe_sub)
+
+                    # 相对 uploads 的子路径
+                    rel_subdir = os.path.dirname(image_path).replace('\\', '/')
+                    dest_dir = os.path.join(dest_root, rel_subdir)
+                    os.makedirs(dest_dir, exist_ok=True)
+
+                    # 复制原图
+                    img_basename = os.path.basename(abs_image)
+                    dest_image_path = os.path.join(dest_dir, img_basename)
+                    shutil.copyfile(abs_image, dest_image_path)
+
+                    # 构造 Labelme JSON
+                    # 读取图像尺寸与数据
+                    with Image.open(abs_image) as im:
+                        width, height = im.size
+                        im_bytes_io = io.BytesIO()
+                        im.save(im_bytes_io, format='JPEG' if im.format == 'JPEG' else 'PNG')
+                        image_b64 = base64.b64encode(im_bytes_io.getvalue()).decode('utf-8')
+
+                    # 解析 detections -> shapes（优先 polygon；如无则从 mask 还原多边形）
+                    try:
+                        poly_eps = float(params.get('polygon_simplify_epsilon', 2.0))
+                    except Exception:
+                        poly_eps = 2.0
+                    try:
+                        col_eps = float(params.get('polygon_collinear_epsilon', 1.0))
+                    except Exception:
+                        col_eps = 1.0
+
+                    shapes = []
+                    for det in detections:
+                        label = str(det.get('label', 'object'))
+                        polygon = det.get('polygon')
+                        if (not polygon or len(polygon) < 3) and det.get('mask'):
+                            try:
+                                mask_b64 = det['mask']
+                                mask_bytes = base64.b64decode(mask_b64)
+                                m = Image.open(io.BytesIO(mask_bytes)).convert('L')
+                                mask_np = np.array(m) > 0
+                                poly = mask_to_polygon(mask_np.astype(np.uint8), epsilon=poly_eps, collinear_eps=col_eps)
+                                polygon = poly
+                            except Exception:
+                                polygon = []
+                        if not polygon or len(polygon) < 3:
+                            # 跳过无效多边形
+                            continue
+                        shapes.append({
+                            'mask': None,
+                            'label': label,
+                            'points': [[float(p[0]), float(p[1])] for p in polygon],
+                            'group_id': None,
+                            'description': '',
+                            'shape_type': 'polygon',
+                            'flags': {}
+                        })
+
+                    labelme_payload = {
+                        'version': '5.3.1',
+                        'flags': {},
+                        'shapes': shapes,
+                        'imagePath': img_basename,
+                        'imageData': image_b64,
+                        'imageHeight': int(height),
+                        'imageWidth': int(width)
+                    }
+
+                    stem = os.path.splitext(img_basename)[0]
+                    json_path = os.path.join(dest_dir, f'{stem}.json')
+                    with open(json_path, 'w', encoding='utf-8') as f:
+                        json.dump(labelme_payload, f, ensure_ascii=False)
+
+                    result_rel = os.path.relpath(json_path, RESULTS_FOLDER)
+                    save_result = {'success': True, 'result_path': result_rel}
+            except Exception as e:
+                print(f"自动保存失败: {str(e)}")
+                save_result = {'success': False, 'error': str(e)}
 
         return jsonify({
             'success': True,
             'image': image_base64,
-            'detections': results
+            'detections': results,
+            'auto_save_result': save_result
         })
 
     except Exception as e:

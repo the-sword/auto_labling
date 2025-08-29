@@ -10,6 +10,10 @@ let hoveredDetectionIndex = null;  // 悬浮的分割结果索引（用于联动
 
 // 功能开关：检测列表与画布的悬浮联动
 const ENABLE_HOVER_LINK = false;
+// 功能开关：启用本地存储持久化
+const ENABLE_LOCAL_STORAGE = true;
+// localStorage键前缀
+const STORAGE_KEY_PREFIX = 'auto_labeling_';
 
 // 多图队列
 let imageQueue = []; // [{ name, file, dataURL (lazy), relPath, serverPath, serverUrl }]
@@ -605,16 +609,42 @@ function updateNavButtons() {
 
 function restoreResultsForIndex(index) {
     // 切换图片时，恢复该图片的分割结果（若存在）
-    const saved = perImageResults.get(index);
     detectionResults = [];
     selectedDetectionIndex = null;
     lastResultImageBase64 = null;
     baseRenderReady = false;
     resultsSection.style.display = 'none';
     detectionsList.innerHTML = '';
+    
+    // 先尝试从内存中获取
+    const saved = perImageResults.get(index);
     if (saved) {
         detectionResults = JSON.parse(JSON.stringify(saved.detections || []));
         displayResults(saved.resultImageBase64 || null, detectionResults);
+        return;
+    }
+    
+    // 如果内存中没有，尝试从localStorage加载
+    if (ENABLE_LOCAL_STORAGE) {
+        const item = imageQueue[index];
+        if (item && item.relPath) {
+            const storageKey = getStorageKeyForImage(item.relPath);
+            const storedData = localStorage.getItem(storageKey);
+            if (storedData) {
+                try {
+                    const parsedData = JSON.parse(storedData);
+                    detectionResults = parsedData.detections || [];
+                    // 保存到内存中，避免重复从localStorage加载
+                    perImageResults.set(index, {
+                        detections: JSON.parse(JSON.stringify(detectionResults)),
+                        resultImageBase64: parsedData.resultImageBase64
+                    });
+                    displayResults(parsedData.resultImageBase64 || null, detectionResults);
+                } catch (err) {
+                    console.error('Failed to parse stored results:', err);
+                }
+            }
+        }
     }
 }
 
@@ -729,10 +759,19 @@ async function performSegmentation() {
             displayResults(data.image, data.detections);
             // 保存当前图片的结果
             if (currentImageIndex >= 0) {
-                perImageResults.set(currentImageIndex, {
+                const resultData = {
                     detections: JSON.parse(JSON.stringify(detectionResults)),
                     resultImageBase64: data.image
-                });
+                };
+                
+                // 保存到内存
+                perImageResults.set(currentImageIndex, resultData);
+                
+                // 保存到localStorage
+                if (ENABLE_LOCAL_STORAGE && queueItem && queueItem.relPath) {
+                    saveResultsToLocalStorage(queueItem.relPath, resultData);
+                }
+                
                 updateQueueInfo();
             }
             // 结果就绪后刷新按钮状态（启用保存按钮等）
@@ -1183,7 +1222,11 @@ function enableCanvasInteractions() {
             if (det && Array.isArray(det.polygon)) {
                 updateBoxFromPolygon(det);
                 baseRenderReady = false;
-                buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
+                buildBaseLayer(lastResultImageBase64, detectionResults).then(() => {
+                    drawFromBaseLayer();
+                    // 保存修改后的结果
+                    saveCurrentResultsToStorage();
+                });
             }
         }
     };
@@ -1373,7 +1416,11 @@ function finishAnnotation() {
     annotateToggleBtn.innerHTML = '<i class="fas fa-draw-polygon"></i> 手动标注模式';
     // 新增的手动标注需要体现在底图
     baseRenderReady = false;
-    buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
+    buildBaseLayer(lastResultImageBase64, detectionResults).then(() => {
+        drawFromBaseLayer();
+        // 保存修改后的结果
+        saveCurrentResultsToStorage();
+    });
 }
 
 function cancelAnnotation() {
@@ -1496,6 +1543,8 @@ function editLabelInline(index) {
         // 标签变更影响底图文字，重建底图
         baseRenderReady = false;
         buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
+        // 保存修改后的结果
+        saveCurrentResultsToStorage();
     };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); });
     input.addEventListener('blur', commit);
@@ -1509,6 +1558,71 @@ function deleteDetection(index) {
     displayDetectionsList(detectionResults);
     baseRenderReady = false;
     buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
+    
+    // 保存修改后的结果
+    saveCurrentResultsToStorage();
+}
+
+// localStorage相关工具函数
+function getStorageKeyForImage(relPath) {
+    return `${STORAGE_KEY_PREFIX}${relPath}`;
+}
+
+function saveResultsToLocalStorage(relPath, resultData) {
+    if (!ENABLE_LOCAL_STORAGE || !relPath) return;
+    try {
+        const storageKey = getStorageKeyForImage(relPath);
+        localStorage.setItem(storageKey, JSON.stringify(resultData));
+    } catch (err) {
+        console.error('Failed to save results to localStorage:', err);
+        // 如果存储失败（可能是存储空间已满），尝试清理一些旧数据
+        if (err.name === 'QuotaExceededError') {
+            cleanupLocalStorage();
+        }
+    }
+}
+
+function saveCurrentResultsToStorage() {
+    if (!ENABLE_LOCAL_STORAGE || currentImageIndex < 0) return;
+    const item = imageQueue[currentImageIndex];
+    if (!item || !item.relPath) return;
+    
+    const resultData = {
+        detections: JSON.parse(JSON.stringify(detectionResults)),
+        resultImageBase64: lastResultImageBase64
+    };
+    
+    // 保存到内存
+    perImageResults.set(currentImageIndex, resultData);
+    
+    // 保存到localStorage
+    saveResultsToLocalStorage(item.relPath, resultData);
+}
+
+function cleanupLocalStorage() {
+    // 简单策略：移除最旧的一半数据
+    try {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key.startsWith(STORAGE_KEY_PREFIX)) {
+                keys.push(key);
+            }
+        }
+        
+        if (keys.length > 10) { // 只有当有足够多的项时才清理
+            // 按字母顺序排序，简单处理
+            keys.sort();
+            // 移除前一半
+            const removeCount = Math.floor(keys.length / 2);
+            for (let i = 0; i < removeCount; i++) {
+                localStorage.removeItem(keys[i]);
+            }
+            console.log(`Cleaned up ${removeCount} old items from localStorage`);
+        }
+    } catch (err) {
+        console.error('Failed to cleanup localStorage:', err);
+    }
 }
 
 // 页面加载完成后初始化
