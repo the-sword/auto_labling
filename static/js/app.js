@@ -613,7 +613,16 @@ function enableCanvasInteractions() {
             return;
         }
 
-        if (selectedDetectionIndex == null) return;
+        // 若当前未选中任何目标，先尝试点击选中一个（支持直接点击选择mask/多边形/框）
+        if (selectedDetectionIndex == null) {
+            const hitIdx = findDetectionAtPoint(pos.x, pos.y);
+            if (hitIdx !== -1) {
+                // 直接设置索引以便本次事件后续逻辑可继续使用（避免需要再次点击）
+                selectedDetectionIndex = hitIdx;
+            } else {
+                return; // 未点中任何目标
+            }
+        }
         const det = detectionResults[selectedDetectionIndex];
         if (!det || !Array.isArray(det.polygon)) return;
 

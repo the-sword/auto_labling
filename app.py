@@ -256,9 +256,9 @@ def segment(image: Image.Image, detection_results: List[DetectionResult], polygo
         return detection_results
 
     boxes = get_boxes(detection_results)
-    print(f"boxes: {boxes}")
+    # print(f"boxes: {boxes}")
     inputs = processor(images=image, input_boxes=[boxes], return_tensors="pt").to(segmentator.device)
-    print(f"inputs: {inputs}")
+    # print(f"inputs: {inputs}")
     with torch.no_grad():
         outputs = segmentator(**inputs)
 
@@ -286,7 +286,7 @@ def grounded_segmentation(image_data: bytes, labels: List[str], threshold: float
     detections = detect(image, labels, threshold)
     detections = segment(image, detections, polygon_refinement, mask_iou_threshold,
                          poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps)
-    print(f"detections: {detections}")
+    # print(f"detections: {detections}")
     return np.array(image), detections
 
 def detection_result_to_dict(detection: DetectionResult, poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Dict:
