@@ -866,11 +866,12 @@ function enableCanvasInteractions() {
 
     // 键盘事件：
     document.onkeydown = (e) => {
-        // 在输入框/文本域/可编辑区域中不拦截
+        // 在输入框/文本域/可编辑区域中不拦截任何快捷键，避免回退键影响多边形
         const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
         const isEditable = (e.target && (e.target.isContentEditable || tag === 'input' || tag === 'textarea'));
+        if (isEditable) return;
         // '?' 打开帮助（Shift + '/'）
-        if (!isEditable && (e.key === '?' || (e.shiftKey && e.key === '/'))) {
+        if (e.key === '?' || (e.shiftKey && e.key === '/')) {
             helpModal && helpModal.show();
             e.preventDefault();
             return;
