@@ -74,6 +74,46 @@ def get_boxes(results: List[DetectionResult]) -> List[List[float]]:
         boxes.append(xyxy)
     return boxes
 
+def bbox_iou(a: BoundingBox, b: BoundingBox) -> float:
+    """计算两个边界框的IoU (Intersection over Union)"""
+    xA = max(a.xmin, b.xmin)
+    yA = max(a.ymin, b.ymin)
+    xB = min(a.xmax, b.xmax)
+    yB = min(a.ymax, b.ymax)
+
+    inter_w = max(0, xB - xA)
+    inter_h = max(0, yB - yA)
+    inter_area = inter_w * inter_h
+
+    area_a = max(0, a.xmax - a.xmin) * max(0, a.ymax - a.ymin)
+    area_b = max(0, b.xmax - b.xmin) * max(0, b.ymax - b.ymin)
+
+    union = area_a + area_b - inter_area
+    if union <= 0:
+        return 0.0
+    return inter_area / union
+
+def nms_detections(detections: List[DetectionResult], iou_threshold: float = 0.5) -> List[DetectionResult]:
+    """对检测结果执行NMS，保留重叠度高的框中的最高分一项，避免一个物体被多个标签覆盖"""
+    if not detections:
+        return detections
+
+    # 按分数从高到低排序
+    sorted_dets = sorted(detections, key=lambda d: d.score, reverse=True)
+    kept: List[DetectionResult] = []
+
+    for det in sorted_dets:
+        overlap = False
+        for kept_det in kept:
+            iou = bbox_iou(det.box, kept_det.box)
+            if iou >= iou_threshold:
+                overlap = True
+                break
+        if not overlap:
+            kept.append(det)
+
+    return kept
+
 def refine_masks(masks: torch.BoolTensor, polygon_refinement: bool = False) -> List[np.ndarray]:
     """优化mask"""
     masks = masks.cpu().float()
@@ -122,6 +162,9 @@ def detect(image: Image.Image, labels: List[str], threshold: float = 0.3) -> Lis
     labels = [label if label.endswith(".") else label+"." for label in labels]
     results = object_detector(image, candidate_labels=labels, threshold=threshold)
     results = [DetectionResult.from_dict(result) for result in results]
+
+    # 对不同标签产生的高度重叠框进行NMS，避免一个物体拥有多个标签
+    results = nms_detections(results, iou_threshold=0.5)
     return results
 
 def segment(image: Image.Image, detection_results: List[DetectionResult], polygon_refinement: bool = False) -> List[DetectionResult]:

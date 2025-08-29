@@ -25,7 +25,7 @@ const errorModal = new bootstrap.Modal(document.getElementById('errorModal'));
 // 预定义标签（可点击快速添加）
 const PREDEFINED_LABELS = [
     'obstacle',
-    'stool',
+    'dung',
     'fence',
     'aldult',
     'pet',
