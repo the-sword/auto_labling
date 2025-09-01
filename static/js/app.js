@@ -227,15 +227,18 @@ function initAugmentPage() {
         const addImageToGallery = (gallery, imageUrl, label) => {
             if (!gallery) return;
             const item = document.createElement('div');
-            item.className = 'gallery-item fade-in';
-            
+            item.className = 'masonry-item fade-in';
+
             const img = document.createElement('img');
+            img.className = 'masonry-img';
+            img.loading = 'lazy';
             img.src = imageUrl;
             item.appendChild(img);
 
             if (label) {
                 const labelEl = document.createElement('div');
-                labelEl.className = 'gallery-label';
+                // Using a simple class, can be styled further in CSS
+                labelEl.className = 'masonry-label'; 
                 labelEl.textContent = label;
                 item.appendChild(labelEl);
             }
