@@ -752,10 +752,16 @@ def save_result_api():
         if not image_path:
             return jsonify({'success': False, 'error': 'image_path required'}), 400
         
+        detections_data = data.get('detections') or []
+        # Remove trailing period from labels before saving
+        for det in detections_data:
+            if det.get('label', '').endswith('.'):
+                det['label'] = det['label'][:-1]
+
         # 使用file_utils模块保存结果
         result = file_utils.save_segmentation_result(
             image_path=image_path,
-            detections=data.get('detections') or [],
+            detections=detections_data,
             params=data.get('params') or {},
             save_subdir=data.get('save_subdir') or ''
         )
