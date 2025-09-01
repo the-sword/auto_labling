@@ -121,8 +121,8 @@ def simplify_polygon(points: List[List[int]], epsilon: float = 2.0, collinear_ep
     
     return simplified
 
-def mask_to_polygon(mask: np.ndarray, epsilon: float = 2.0, collinear_eps: float = 1.0) -> List[List[int]]:
-    """将mask转换为简化后的多边形坐标"""
+def mask_to_polygon(mask: np.ndarray, epsilon: float = 2.0, collinear_eps: float = 1.0, offset: Optional[Tuple[int, int]] = None) -> List[List[int]]:
+    """将mask转换为简化后的多边形坐标，并根据需要应用偏移量"""
     import cv2
     
     if mask is None:
@@ -145,7 +145,14 @@ def mask_to_polygon(mask: np.ndarray, epsilon: float = 2.0, collinear_eps: float
     points = max_contour.reshape(-1, 2).tolist()
     
     # 简化多边形
-    return simplify_polygon(points, epsilon, collinear_eps)
+    simplified_points = simplify_polygon(points, epsilon, collinear_eps)
+
+    # 如果提供了偏移量，则应用它
+    if offset and simplified_points:
+        ox, oy = offset
+        simplified_points = [[p[0] + ox, p[1] + oy] for p in simplified_points]
+
+    return simplified_points
 
 def sanitize_path(path: str) -> str:
     """清理路径，防止路径遍历攻击"""
@@ -309,6 +316,33 @@ def save_segmentation_result(
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
+def sanitize_filename(filename: str) -> str:
+    """清理文件名，确保安全"""
+    return ''.join(c for c in filename if c.isalnum() or c in (' ', '.', '-', '_')).strip().replace(' ', '_')
+
+def find_image_files(directory: str) -> List[str]:
+    """
+    递归查找目录下的所有图片文件
+
+    Args:
+        directory: 要搜索的目录路径
+
+    Returns:
+        List[str]: 图片文件的绝对路径列表
+    """
+    supported_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif']
+    image_files = []
+
+    if not os.path.isdir(directory):
+        return []
+
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if any(file.lower().endswith(ext) for ext in supported_extensions):
+                image_files.append(os.path.join(root, file))
+
+    return image_files
+
 def save_uploaded_files(files, rel_path=''):
     """
     保存上传的文件
@@ -320,8 +354,6 @@ def save_uploaded_files(files, rel_path=''):
     Returns:
         Dict: 包含保存结果的字典
     """
-    def sanitize_filename(filename):
-        return ''.join(c for c in filename if c.isalnum() or c in (' ', '.', '-', '_')).strip().replace(' ', '_')
     
     saved = []
     for idx, f in enumerate(files):

@@ -134,6 +134,124 @@ function initCrawlPage() {
     });
 }
 
+// ============ 数据增强（页签） ============
+function initAugmentPage() {
+    const startBtn = document.getElementById('augmentStartBtn');
+    const stopBtn = document.getElementById('augmentStopBtn');
+    const statusBox = document.getElementById('augmentStatus');
+    const progressBar = document.getElementById('augmentProgress');
+    const progressBarInner = progressBar ? progressBar.querySelector('.progress-bar') : null;
+
+    if (!startBtn) return;
+    if (startBtn.dataset.bound === '1') return;
+    startBtn.dataset.bound = '1';
+
+    let currentStream = null;
+
+    const setRunning = (running) => {
+        const sampleDirInput = document.getElementById('augmentSampleDir');
+        const bgDirInput = document.getElementById('augmentBgDir');
+        const classNameInput = document.getElementById('augmentClassName');
+        const outDirInput = document.getElementById('augmentOutDir');
+
+        if (running) {
+            startBtn.disabled = true;
+            startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 正在增强…';
+            if (stopBtn) stopBtn.disabled = false;
+            if (progressBar) progressBar.style.display = 'flex';
+            if (progressBarInner) progressBarInner.style.width = '0%';
+            [sampleDirInput, bgDirInput, classNameInput, outDirInput].forEach(el => el && (el.disabled = true));
+        } else {
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<i class="fas fa-play"></i> 开始增强';
+            if (stopBtn) stopBtn.disabled = true;
+            [sampleDirInput, bgDirInput, classNameInput, outDirInput].forEach(el => el && (el.disabled = false));
+        }
+    };
+
+    if (stopBtn && !stopBtn.dataset.bound) {
+        stopBtn.dataset.bound = '1';
+        stopBtn.addEventListener('click', async () => {
+            try {
+                stopBtn.disabled = true;
+                await fetch('/api/augment/stop', { method: 'POST' });
+                if (statusBox) statusBox.textContent = '已请求停止，请稍候…';
+            } catch (e) {
+                console.error(e);
+            }
+        });
+    }
+
+    startBtn.addEventListener('click', () => {
+        const sampleDir = document.getElementById('augmentSampleDir').value.trim();
+        const bgDir = document.getElementById('augmentBgDir').value.trim();
+        const className = document.getElementById('augmentClassName').value.trim();
+        const outDir = document.getElementById('augmentOutDir').value.trim();
+
+        if (!sampleDir || !bgDir || !className) {
+            showError('样本文件夹、背景文件夹和目标类别不能为空');
+            return;
+        }
+
+        if (currentStream) {
+            try { currentStream.close(); } catch (e) {}
+        }
+        
+        setRunning(true);
+        if (statusBox) statusBox.textContent = '准备开始…';
+
+        const params = new URLSearchParams({
+            sample_dir: sampleDir,
+            bg_dir: bgDir,
+            class_name: className,
+        });
+        if (outDir) params.set('out_dir', outDir);
+
+        const url = '/api/augment/stream?' + params.toString();
+        const es = new EventSource(url);
+        currentStream = es;
+
+        es.addEventListener('progress', (ev) => {
+            try {
+                const data = JSON.parse(ev.data || '{}');
+                if (statusBox) statusBox.textContent = data.message || '正在处理...';
+                if (progressBarInner && data.progress) {
+                    progressBarInner.style.width = `${data.progress}%`;
+                }
+            } catch (e) {
+                console.error('Progress event error:', e);
+            }
+        });
+
+        es.addEventListener('done', (ev) => {
+            try {
+                const data = JSON.parse(ev.data || '{}');
+                if (statusBox) statusBox.textContent = data.message || '处理完成';
+                if (data.success === false) {
+                    showError(data.error || '数据增强失败');
+                } else {
+                    showSuccess(data.message || '数据增强完成');
+                }
+            } catch (e) {
+                console.error('Done event error:', e);
+            } finally {
+                setRunning(false);
+                if (progressBarInner) progressBarInner.style.width = '100%';
+                try { es.close(); } catch (e) {}
+                currentStream = null;
+            }
+        });
+
+        es.addEventListener('error', (ev) => {
+            console.warn('SSE error', ev);
+            if (statusBox) statusBox.textContent = '连接错误，请检查后台服务。';
+            setRunning(false);
+            try { es.close(); } catch (e) {}
+            currentStream = null;
+        });
+    });
+}
+
 function renderCrawlGallery(galleryEl, items, replace) {
     if (!galleryEl) return;
     if (replace) galleryEl.innerHTML = '';
@@ -1890,4 +2008,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // 初始化图片爬虫（页签）
     initCrawlPage();
+
+    // 初始化数据增强（页签）
+    initAugmentPage();
 });

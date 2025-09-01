@@ -22,6 +22,11 @@
                     <i class="fas fa-spider"></i> 图片爬虫
                 </button>
             </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-augment" data-bs-toggle="tab" data-bs-target="#sheet-augment" type="button" role="tab" aria-controls="sheet-augment" aria-selected="false">
+                    <i class="fas fa-magic"></i> 数据增强
+                </button>
+            </li>
         </ul>
         <div class="tab-content" id="mainTabsContent">
             <!-- 自动标注系统 Sheet -->
@@ -209,6 +214,55 @@
                                 <span class="visually-hidden">Loading...</span>
                             </div>
                             <p class="mt-3">正在处理中，请稍候...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据增强 Sheet -->
+    <div class="tab-pane fade" id="sheet-augment" role="tabpanel" aria-labelledby="tab-augment">
+        <div class="row mt-3">
+            <div class="col-md-10 col-lg-8 mx-auto">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-magic"></i> 数据增强
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">从“样本文件夹”中分割指定物体，并将其随机粘贴到“背景文件夹”的图片上，生成新的训练数据。</p>
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label" for="augmentSampleDir">样本文件夹</label>
+                                <input type="text" class="form-control" id="augmentSampleDir" placeholder="包含要分割物体的图片文件夹路径">
+                                <div class="form-text">绝对路径或相对`results/`的路径。</div>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" for="augmentBgDir">背景文件夹</label>
+                                <input type="text" class="form-control" id="augmentBgDir" placeholder="用于粘贴物体的背景图片文件夹路径">
+                                <div class="form-text">绝对路径或相对`results/`的路径。</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="augmentClassName">目标类别</label>
+                                <input type="text" class="form-control" id="augmentClassName" placeholder="如：cat, dog">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="augmentOutDir">输出文件夹</label>
+                                <input type="text" class="form-control" id="augmentOutDir" placeholder="aug_results/my_dataset">
+                                <div class="form-text">留空则默认保存至 `results/augmented_data`。</div>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2 mt-3">
+                            <button class="btn btn-primary" id="augmentStartBtn">
+                                <i class="fas fa-play"></i> 开始增强
+                            </button>
+                            <button class="btn btn-outline-danger" id="augmentStopBtn" disabled>
+                                <i class="fas fa-stop"></i> 停止
+                            </button>
+                            <div class="align-self-center small text-muted" id="augmentStatus"></div>
+                        </div>
+                        <div class="mt-3 progress" style="display: none;" id="augmentProgress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
                         </div>
                     </div>
                 </div>

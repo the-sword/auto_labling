@@ -24,6 +24,12 @@ from transformers import AutoModelForMaskGeneration, AutoProcessor, pipeline
 import file_utils
 import crawler
 
+# ================= augmentation =================
+from threading import Event
+
+# 全局停止事件
+AUGMENT_STOP_EVENT = Event()
+
 app = Flask(__name__)
 CORS(app)
 
@@ -175,7 +181,7 @@ def refine_masks(masks: torch.BoolTensor, polygon_refinement: bool = False,
     if polygon_refinement:
         for idx, mask in enumerate(masks):
             shape = mask.shape
-            polygon = mask_to_polygon(mask, epsilon=poly_simplify_eps, collinear_eps=poly_collinear_eps)
+            polygon = mask_to_polygon(mask, epsilon=0.8, collinear_eps=1.0)
             if polygon:
                 mask = polygon_to_mask(polygon, shape)
                 masks[idx] = mask
@@ -758,6 +764,178 @@ def save_result_api():
             return jsonify(result)
         else:
             return jsonify(result), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ======================================================================================================================
+# =================================================== 数据增强 API ===================================================
+# ======================================================================================================================
+
+def _augment_sse_event(event: str, data: dict) -> str:
+    return f"event: {event}\n" + "data: " + json.dumps(data, ensure_ascii=False) + "\n\n"
+
+def _load_image_from_any_path(path: str) -> Optional[Image.Image]:
+    """安全地从任意路径加载图像，确保路径是文件且存在"""
+    abs_path = os.path.abspath(path)
+    if not os.path.isfile(abs_path):
+        return None
+    try:
+        return Image.open(abs_path).convert("RGBA")
+    except Exception as e:
+        print(f"Error loading image {path}: {e}")
+        return None
+
+def augment_and_save(sample_dir: str, bg_dir: str, class_name: str, out_dir: str):
+    """数据增强核心逻辑：分割、提取、随机组合并保存"""
+    try:
+        # 1. 准备工作：查找图片、创建输出目录
+        yield _augment_sse_event('progress', {'message': '正在准备文件...', 'progress': 5})
+        sample_files = file_utils.find_image_files(sample_dir)
+        bg_files = file_utils.find_image_files(bg_dir)
+        os.makedirs(out_dir, exist_ok=True)
+
+        if not sample_files or not bg_files:
+            raise ValueError("样本或背景文件夹中没有找到图片")
+
+        # 2. 从样本中提取目标
+        yield _augment_sse_event('progress', {'message': f'正在从{len(sample_files)}个样本中提取 {class_name}...', 'progress': 15})
+        extracted_objects = []
+        for i, sample_path in enumerate(sample_files):
+            if AUGMENT_STOP_EVENT.is_set(): return
+            
+            with open(sample_path, 'rb') as f:
+                img_data = f.read()
+            
+            _, detections = grounded_segmentation(img_data, [class_name], threshold=0.4, mask_iou_threshold=0.7)
+            
+            for det in detections:
+                if det.label.strip('.') == class_name and det.mask is not None:
+                    img = Image.open(io.BytesIO(img_data)).convert("RGBA")
+                    mask = Image.fromarray(det.mask.astype(np.uint8) * 255).convert('L')
+                    
+                    # 裁切 bbox 区域，应用蒙版
+                    obj_img = Image.new("RGBA", img.size)
+                    obj_img.paste(img, mask=mask)
+                    bbox = (det.box.xmin, det.box.ymin, det.box.xmax, det.box.ymax)
+                    cropped_obj = obj_img.crop(bbox)
+                    extracted_objects.append(cropped_obj)
+            
+            progress = 15 + int(35 * (i + 1) / len(sample_files))
+            yield _augment_sse_event('progress', {'message': f'已处理 {i+1}/{len(sample_files)} 个样本', 'progress': progress})
+
+        if not extracted_objects:
+            raise ValueError(f"在样本中未能分割出任何 '{class_name}' 物体")
+
+        # 3. 生成增强图片
+        yield _augment_sse_event('progress', {'message': f'共提取到 {len(extracted_objects)} 个物体，开始生成增强图片...', 'progress': 50})
+        num_to_generate = min(len(extracted_objects) * 5, 200) # 最多生成200张
+        
+        for i in range(num_to_generate):
+            if AUGMENT_STOP_EVENT.is_set(): return
+
+            bg_path = random.choice(bg_files)
+            background = _load_image_from_any_path(bg_path)
+            if not background:
+                continue
+            
+            # 随机选择一个或多个物体进行粘贴
+            num_objects = random.randint(1, min(len(extracted_objects), 3))
+            selected_objects = random.sample(extracted_objects, num_objects)
+            
+            new_detections = []
+            current_bg = background.copy()
+
+            for obj_img in selected_objects:
+                # 随机缩放
+                scale = random.uniform(0.5, 1.2)
+                new_size = (int(obj_img.width * scale), int(obj_img.height * scale))
+                if new_size[0] == 0 or new_size[1] == 0: continue
+                resized_obj = obj_img.resize(new_size, Image.LANCZOS)
+
+                # 随机位置
+                max_x = current_bg.width - resized_obj.width
+                max_y = current_bg.height - resized_obj.height
+                if max_x <= 0 or max_y <= 0: continue
+                paste_x = random.randint(0, max_x)
+                paste_y = random.randint(0, max_y)
+
+                # 粘贴
+                current_bg.paste(resized_obj, (paste_x, paste_y), resized_obj)
+
+                # 保存标注信息
+                mask_np = np.array(resized_obj.split()[-1]) > 0
+                new_detections.append({
+                    'label': class_name,
+                    'polygon': file_utils.mask_to_polygon(mask_np, epsilon=0.8, offset=(paste_x, paste_y)),
+                    'shape_type': 'polygon',
+                })
+
+            # 保存图片和标注
+            img_filename = f"augmented_{i+1:04d}.jpg"
+            json_filename = f"augmented_{i+1:04d}.json"
+            img_path = os.path.join(out_dir, img_filename)
+            json_path = os.path.join(out_dir, json_filename)
+
+            current_bg.convert("RGB").save(img_path, 'JPEG', quality=95)
+            
+            labelme_data = {
+                'version': '5.0.1',
+                'flags': {},
+                'shapes': new_detections,
+                'imagePath': img_filename,
+                'imageData': None,
+                'imageHeight': current_bg.height,
+                'imageWidth': current_bg.width,
+            }
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(labelme_data, f, indent=2, ensure_ascii=False)
+
+            progress = 50 + int(50 * (i + 1) / num_to_generate)
+            yield _augment_sse_event('progress', {'message': f'已生成 {i+1}/{num_to_generate} 张增强图片', 'progress': progress})
+
+        yield _augment_sse_event('done', {'success': True, 'message': f'数据增强完成，共生成 {num_to_generate} 张图片。'})
+
+    except Exception as e:
+        yield _augment_sse_event('done', {'success': False, 'error': str(e)})
+
+@app.route('/api/augment/stream', methods=['GET'])
+def augment_stream_api():
+    """SSE: 数据增强流式API"""
+    @stream_with_context
+    def generate():
+        try:
+            sample_dir = request.args.get('sample_dir')
+            bg_dir = request.args.get('bg_dir')
+            class_name = request.args.get('class_name')
+            out_dir = request.args.get('out_dir')
+
+            if not all([sample_dir, bg_dir, class_name]):
+                yield _augment_sse_event('done', {'success': False, 'error': '缺少必要参数'})
+                return
+
+            if not out_dir:
+                safe_name = file_utils.sanitize_filename(class_name) or 'augmented'
+                out_dir = os.path.join(RESULTS_FOLDER, 'augmented_data', safe_name)
+            
+            AUGMENT_STOP_EVENT.clear()
+            yield from augment_and_save(sample_dir, bg_dir, class_name, out_dir)
+
+        except Exception as e:
+            yield _augment_sse_event('done', {'success': False, 'error': str(e)})
+
+    headers = {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+    }
+    return Response(stream_with_context(generate()), headers=headers)
+
+@app.route('/api/augment/stop', methods=['POST'])
+def augment_stop_api():
+    """请求停止数据增强任务"""
+    try:
+        AUGMENT_STOP_EVENT.set()
+        return jsonify({'success': True, 'message': '已请求停止数据增强任务'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
