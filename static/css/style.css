@@ -1,4 +1,25 @@
 /* 全局样式 */
+.header {
+    position: sticky;
+    top: 0;
+    z-index: 1020; /* Ensure it's above other content */
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(10px);
+}
+
+.nav-tabs .nav-link {
+    color: #495057; /* A darker color for inactive tabs */
+}
+
+.nav-tabs .nav-link.active {
+    color: #667eea; /* Keep the active color vibrant */
+    font-weight: bold;
+}
+
+.nav-tabs .nav-link:not(.active):hover {
+    color: #000;
+}
+
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
