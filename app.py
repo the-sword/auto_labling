@@ -283,9 +283,13 @@ def grounded_segmentation(image_data: bytes, labels: List[str], threshold: float
 
 def detection_result_to_dict(detection: DetectionResult, poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Dict:
     """将DetectionResult转换为可序列化的字典"""
+    label = detection.label
+    if label.endswith('.'):
+        label = label[:-1]
+
     result = {
         'score': float(detection.score),
-        'label': detection.label,
+        'label': label,
         'box': {
             'xmin': detection.box.xmin,
             'ymin': detection.box.ymin,
