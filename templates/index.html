@@ -242,6 +242,14 @@
                                 <input type="text" class="form-control" id="augmentBgDir" placeholder="用于粘贴物体的背景图片文件夹路径">
                                 <div class="form-text">绝对路径或相对`results/`的路径。</div>
                             </div>
+                            <div class="form-group">
+                                <label for="augmentOutDir">输出目录 (可选)</label>
+                                <input type="text" id="augmentOutDir" class="form-control" placeholder="留空则自动创建">
+                            </div>
+                            <div class="form-group">
+                                <label for="augmentThreshold">检测阈值: <span id="augmentThresholdValue">0.4</span></label>
+                                <input type="range" id="augmentThreshold" class="form-control-range" min="0.1" max="0.9" step="0.05" value="0.4">
+                            </div>
                             <div class="col-md-6">
                                 <label class="form-label" for="augmentClassName">目标类别</label>
                                 <input type="text" class="form-control" id="augmentClassName" placeholder="如：cat, dog">
@@ -263,6 +271,17 @@
                         </div>
                         <div class="mt-3 progress" style="display: none;" id="augmentProgress">
                             <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+
+                        <div class="mt-4" id="augmentResultsContainer" style="display: none;">
+                            <div>
+                                <h5>提取出的物体</h5>
+                                <div class="gallery" id="segmentedObjectsGallery"></div>
+                            </div>
+                            <div class="mt-4">
+                                <h5>生成的增强图片</h5>
+                                <div class="gallery" id="augmentedImagesGallery"></div>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -785,7 +785,7 @@ def _load_image_from_any_path(path: str) -> Optional[Image.Image]:
         print(f"Error loading image {path}: {e}")
         return None
 
-def augment_and_save(sample_dir: str, bg_dir: str, class_name: str, out_dir: str):
+def augment_and_save(sample_dir: str, bg_dir: str, class_name: str, out_dir: str, threshold: float = 0.4):
     """数据增强核心逻辑：分割、提取、随机组合并保存"""
     try:
         # 1. 准备工作：查找图片、创建输出目录
@@ -806,7 +806,7 @@ def augment_and_save(sample_dir: str, bg_dir: str, class_name: str, out_dir: str
             with open(sample_path, 'rb') as f:
                 img_data = f.read()
             
-            _, detections = grounded_segmentation(img_data, [class_name], threshold=0.4, mask_iou_threshold=0.7)
+            _, detections = grounded_segmentation(img_data, [class_name], threshold=threshold, mask_iou_threshold=0.7)
             
             for det in detections:
                 if det.label.strip('.') == class_name and det.mask is not None:
@@ -819,6 +819,12 @@ def augment_and_save(sample_dir: str, bg_dir: str, class_name: str, out_dir: str
                     bbox = (det.box.xmin, det.box.ymin, det.box.xmax, det.box.ymax)
                     cropped_obj = obj_img.crop(bbox)
                     extracted_objects.append(cropped_obj)
+
+                    # Yield segmented object for real-time display
+                    buffer = io.BytesIO()
+                    cropped_obj.save(buffer, format='PNG')
+                    img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                    yield _augment_sse_event('segmented_object', {'image': f"data:image/png;base64,{img_base64}"})
             
             progress = 15 + int(35 * (i + 1) / len(sample_files))
             yield _augment_sse_event('progress', {'message': f'已处理 {i+1}/{len(sample_files)} 个样本', 'progress': progress})
@@ -877,18 +883,15 @@ def augment_and_save(sample_dir: str, bg_dir: str, class_name: str, out_dir: str
             json_path = os.path.join(out_dir, json_filename)
 
             current_bg.convert("RGB").save(img_path, 'JPEG', quality=95)
-            
-            labelme_data = {
-                'version': '5.0.1',
-                'flags': {},
-                'shapes': new_detections,
-                'imagePath': img_filename,
-                'imageData': None,
-                'imageHeight': current_bg.height,
-                'imageWidth': current_bg.width,
-            }
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(labelme_data, f, indent=2, ensure_ascii=False)
+            file_utils.save_labelme_json(json_path, new_detections, img_filename, img_path)
+
+            # Yield augmented image for real-time display
+            try:
+                rel_path = os.path.relpath(img_path, RESULTS_FOLDER)
+                img_url = url_for('serve_results', filename=rel_path)
+                yield _augment_sse_event('augmented_image', {'url': img_url, 'label': json_filename})
+            except Exception as e:
+                print(f"Could not generate URL for {img_path}: {e}")
 
             progress = 50 + int(50 * (i + 1) / num_to_generate)
             yield _augment_sse_event('progress', {'message': f'已生成 {i+1}/{num_to_generate} 张增强图片', 'progress': progress})
@@ -906,8 +909,12 @@ def augment_stream_api():
         try:
             sample_dir = request.args.get('sample_dir')
             bg_dir = request.args.get('bg_dir')
-            class_name = request.args.get('class_name')
-            out_dir = request.args.get('out_dir')
+            class_name = request.args.get('class_name', '').strip()
+            out_dir = request.args.get('out_dir', '').strip()
+            try:
+                threshold = float(request.args.get('threshold', 0.4))
+            except (ValueError, TypeError):
+                threshold = 0.4
 
             if not all([sample_dir, bg_dir, class_name]):
                 yield _augment_sse_event('done', {'success': False, 'error': '缺少必要参数'})
@@ -918,7 +925,10 @@ def augment_stream_api():
                 out_dir = os.path.join(RESULTS_FOLDER, 'augmented_data', safe_name)
             
             AUGMENT_STOP_EVENT.clear()
-            yield from augment_and_save(sample_dir, bg_dir, class_name, out_dir)
+            gen = augment_and_save(sample_dir, bg_dir, class_name, out_dir, threshold=threshold)
+
+            for item in gen:
+                yield item
 
         except Exception as e:
             yield _augment_sse_event('done', {'success': False, 'error': str(e)})

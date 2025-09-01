@@ -343,6 +343,47 @@ def find_image_files(directory: str) -> List[str]:
 
     return image_files
 
+def save_labelme_json(json_path: str, detections: List[Dict], image_filename: str, image_path: str):
+    """
+    为增强后的图像保存 LabelMe 格式的 JSON 文件。
+
+    Args:
+        json_path (str): 要保存的JSON文件的完整路径。
+        detections (List[Dict]): 检测结果列表，每个元素包含 'label' 和 'points'。
+        image_filename (str): 图像的文件名。
+        image_path (str): 图像的完整路径，用于读取图像数据并进行base64编码。
+    """
+    try:
+        with Image.open(image_path) as img:
+            width, height = img.size
+            img_data = image_to_base64(img, format='JPEG' if image_filename.lower().endswith('.jpg') or image_filename.lower().endswith('.jpeg') else 'PNG')
+
+        shapes = []
+        for det in detections:
+            shapes.append({
+                'label': det.get('label', 'unknown'),
+                'points': det.get('points', []),
+                'group_id': None,
+                'shape_type': 'polygon',
+                'flags': {},
+            })
+
+        labelme_data = {
+            'version': '5.3.1',
+            'flags': {},
+            'shapes': shapes,
+            'imagePath': image_filename,
+            'imageData': img_data,
+            'imageHeight': height,
+            'imageWidth': width,
+        }
+
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(labelme_data, f, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        print(f"Error saving labelme json to {json_path}: {e}")
+
 def save_uploaded_files(files, rel_path=''):
     """
     保存上传的文件

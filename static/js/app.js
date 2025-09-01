@@ -141,6 +141,8 @@ function initAugmentPage() {
     const statusBox = document.getElementById('augmentStatus');
     const progressBar = document.getElementById('augmentProgress');
     const progressBarInner = progressBar ? progressBar.querySelector('.progress-bar') : null;
+    const thresholdSlider = document.getElementById('augmentThreshold');
+    const thresholdValue = document.getElementById('augmentThresholdValue');
 
     if (!startBtn) return;
     if (startBtn.dataset.bound === '1') return;
@@ -153,6 +155,7 @@ function initAugmentPage() {
         const bgDirInput = document.getElementById('augmentBgDir');
         const classNameInput = document.getElementById('augmentClassName');
         const outDirInput = document.getElementById('augmentOutDir');
+        const thresholdInput = document.getElementById('augmentThreshold');
 
         if (running) {
             startBtn.disabled = true;
@@ -160,12 +163,12 @@ function initAugmentPage() {
             if (stopBtn) stopBtn.disabled = false;
             if (progressBar) progressBar.style.display = 'flex';
             if (progressBarInner) progressBarInner.style.width = '0%';
-            [sampleDirInput, bgDirInput, classNameInput, outDirInput].forEach(el => el && (el.disabled = true));
+            [sampleDirInput, bgDirInput, classNameInput, outDirInput, thresholdInput].forEach(el => el && (el.disabled = true));
         } else {
             startBtn.disabled = false;
             startBtn.innerHTML = '<i class="fas fa-play"></i> 开始增强';
             if (stopBtn) stopBtn.disabled = true;
-            [sampleDirInput, bgDirInput, classNameInput, outDirInput].forEach(el => el && (el.disabled = false));
+            [sampleDirInput, bgDirInput, classNameInput, outDirInput, thresholdInput].forEach(el => el && (el.disabled = false));
         }
     };
 
@@ -187,6 +190,7 @@ function initAugmentPage() {
         const bgDir = document.getElementById('augmentBgDir').value.trim();
         const className = document.getElementById('augmentClassName').value.trim();
         const outDir = document.getElementById('augmentOutDir').value.trim();
+        const threshold = document.getElementById('augmentThreshold').value;
 
         if (!sampleDir || !bgDir || !className) {
             showError('样本文件夹、背景文件夹和目标类别不能为空');
@@ -196,6 +200,14 @@ function initAugmentPage() {
         if (currentStream) {
             try { currentStream.close(); } catch (e) {}
         }
+
+        const augmentResultsContainer = document.getElementById('augmentResultsContainer');
+        const segmentedObjectsGallery = document.getElementById('segmentedObjectsGallery');
+        const augmentedImagesGallery = document.getElementById('augmentedImagesGallery');
+
+        if (augmentResultsContainer) augmentResultsContainer.style.display = 'block';
+        if (segmentedObjectsGallery) segmentedObjectsGallery.innerHTML = '';
+        if (augmentedImagesGallery) augmentedImagesGallery.innerHTML = '';
         
         setRunning(true);
         if (statusBox) statusBox.textContent = '准备开始…';
@@ -204,12 +216,53 @@ function initAugmentPage() {
             sample_dir: sampleDir,
             bg_dir: bgDir,
             class_name: className,
+            threshold: threshold,
         });
         if (outDir) params.set('out_dir', outDir);
 
         const url = '/api/augment/stream?' + params.toString();
         const es = new EventSource(url);
         currentStream = es;
+
+        const addImageToGallery = (gallery, imageUrl, label) => {
+            if (!gallery) return;
+            const item = document.createElement('div');
+            item.className = 'gallery-item fade-in';
+            
+            const img = document.createElement('img');
+            img.src = imageUrl;
+            item.appendChild(img);
+
+            if (label) {
+                const labelEl = document.createElement('div');
+                labelEl.className = 'gallery-label';
+                labelEl.textContent = label;
+                item.appendChild(labelEl);
+            }
+            gallery.appendChild(item);
+        };
+
+        es.addEventListener('segmented_object', (ev) => {
+            try {
+                const data = JSON.parse(ev.data || '{}');
+                if (data.image) {
+                    addImageToGallery(segmentedObjectsGallery, data.image);
+                }
+            } catch (e) {
+                console.error('Segmented object event error:', e);
+            }
+        });
+
+        es.addEventListener('augmented_image', (ev) => {
+            try {
+                const data = JSON.parse(ev.data || '{}');
+                if (data.url) {
+                    addImageToGallery(augmentedImagesGallery, data.url, data.label);
+                }
+            } catch (e) {
+                console.error('Augmented image event error:', e);
+            }
+        });
 
         es.addEventListener('progress', (ev) => {
             try {
@@ -250,6 +303,12 @@ function initAugmentPage() {
             currentStream = null;
         });
     });
+
+    if (thresholdSlider && thresholdValue) {
+        thresholdSlider.addEventListener('input', (e) => {
+            thresholdValue.textContent = e.target.value;
+        });
+    }
 }
 
 function renderCrawlGallery(galleryEl, items, replace) {

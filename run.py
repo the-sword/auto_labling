@@ -20,21 +20,21 @@ def check_python_version():
 def check_dependencies():
     """检查依赖包"""
     required_packages = [
-        'torch', 'transformers', 'flask', 'opencv-python', 
+        'torch', 'transformers', 'flask',
         'PIL', 'numpy', 'requests'
     ]
-    
+
     missing_packages = []
-    
+
     for package in required_packages:
         if package == 'PIL':
             spec = importlib.util.find_spec('PIL')
         else:
             spec = importlib.util.find_spec(package)
-        
+
         if spec is None:
             missing_packages.append(package)
-    
+
     if missing_packages:
         print("❌ 缺少以下依赖包:")
         for package in missing_packages:
@@ -42,7 +42,7 @@ def check_dependencies():
         print("\n请运行以下命令安装依赖:")
         print("pip install -r requirements.txt")
         return False
-    
+
     print("✅ 依赖包检查通过")
     return True
 
@@ -72,27 +72,27 @@ def main():
     """主函数"""
     print("🚀 SAM任意物体分割应用启动器")
     print("=" * 50)
-    
+
     # 检查Python版本
     if not check_python_version():
         sys.exit(1)
-    
+
     # 检查依赖
     if not check_dependencies():
         sys.exit(1)
-    
+
     # 检查CUDA
     check_cuda()
-    
+
     # 创建目录
     create_directories()
-    
+
     print("\n" + "=" * 50)
     print("🎯 启动应用...")
     print("📱 应用将在 http://localhost:5000 启动")
     print("🛑 按 Ctrl+C 停止应用")
     print("=" * 50)
-    
+
     try:
         # 启动Flask应用
         from app import app
