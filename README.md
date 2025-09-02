@@ -186,6 +186,6 @@ auto_labling/
 
 ## 致谢
 
-- [Grounding DINO](https://github.com/IDEA-Research/GroundingDINO)
+- [IDEA\-Research/grounding\-dino\-tiny · Hugging Face](https://huggingface.co/IDEA-Research/grounding-dino-tiny)
 - [Segment Anything](https://github.com/facebookresearch/segment-anything)
-- [Hugging Face Transformers](https://github.com/huggingface/transformers)
+- [facebook/sam\-vit\-base · Hugging Face](https://huggingface.co/facebook/sam-vit-base)
