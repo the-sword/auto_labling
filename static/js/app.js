@@ -76,7 +76,7 @@ function initCrawlPage() {
         const engine = (engineSelect && engineSelect.value) || 'bing';
         const limit = parseInt((limitInput && limitInput.value) || '30', 10);
         const outDir = ((outDirInput && outDirInput.value) || '').trim();
-        
+
         if (!query) {
             showError('请输入关键词');
             return;
@@ -208,7 +208,7 @@ function initAugmentPage() {
         if (augmentResultsContainer) augmentResultsContainer.style.display = 'block';
         if (segmentedObjectsGallery) segmentedObjectsGallery.innerHTML = '';
         if (augmentedImagesGallery) augmentedImagesGallery.innerHTML = '';
-        
+
         setRunning(true);
         if (statusBox) statusBox.textContent = '准备开始…';
 
@@ -238,7 +238,7 @@ function initAugmentPage() {
             if (label) {
                 const labelEl = document.createElement('div');
                 // Using a simple class, can be styled further in CSS
-                labelEl.className = 'masonry-label'; 
+                labelEl.className = 'masonry-label';
                 labelEl.textContent = label;
                 item.appendChild(labelEl);
             }
@@ -582,13 +582,13 @@ const PREDEFINED_LABELS = [
     'obstacle',
     'dung',
     'fence',
-    'aldult',
+    'adult',
     'pet',
     'leaf',
     'charging station',
     'manhole cover',
     'water',
-    'flagstone',
+    'flatstone',
     'Flat spray can',
     'pipeline',
     'mud',
@@ -673,7 +673,7 @@ function initializeEventListeners() {
         const modal = new bootstrap.Modal(document.getElementById('folderConfigModal'));
         modal.show();
     });
-    
+
     // 上传区域点击事件
     document.getElementById('uploadArea').addEventListener('click', function() {
         document.getElementById('imageInput').click();
@@ -964,7 +964,7 @@ function restoreResultsForIndex(index) {
     baseRenderReady = false;
     resultsSection.style.display = 'none';
     detectionsList.innerHTML = '';
-    
+
     // 先尝试从内存中获取
     const saved = perImageResults.get(index);
     if (saved) {
@@ -972,7 +972,7 @@ function restoreResultsForIndex(index) {
         displayResults(saved.resultImageBase64 || null, detectionResults);
         return;
     }
-    
+
     // 如果内存中没有，尝试从localStorage加载
     if (ENABLE_LOCAL_STORAGE) {
         const item = imageQueue[index];
@@ -1112,15 +1112,15 @@ async function performSegmentation() {
                     detections: JSON.parse(JSON.stringify(detectionResults)),
                     resultImageBase64: data.image
                 };
-                
+
                 // 保存到内存
                 perImageResults.set(currentImageIndex, resultData);
-                
+
                 // 保存到localStorage
                 if (ENABLE_LOCAL_STORAGE && queueItem && queueItem.relPath) {
                     saveResultsToLocalStorage(queueItem.relPath, resultData);
                 }
-                
+
                 updateQueueInfo();
             }
             // 结果就绪后刷新按钮状态（启用保存按钮等）
@@ -1916,7 +1916,7 @@ function deleteDetection(index) {
     displayDetectionsList(detectionResults);
     baseRenderReady = false;
     buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
-    
+
     // 保存修改后的结果
     saveCurrentResultsToStorage();
 }
@@ -1944,15 +1944,15 @@ function saveCurrentResultsToStorage() {
     if (!ENABLE_LOCAL_STORAGE || currentImageIndex < 0) return;
     const item = imageQueue[currentImageIndex];
     if (!item || !item.relPath) return;
-    
+
     const resultData = {
         detections: JSON.parse(JSON.stringify(detectionResults)),
         resultImageBase64: lastResultImageBase64
     };
-    
+
     // 保存到内存
     perImageResults.set(currentImageIndex, resultData);
-    
+
     // 保存到localStorage
     saveResultsToLocalStorage(item.relPath, resultData);
 }
@@ -1967,7 +1967,7 @@ function cleanupLocalStorage() {
                 keys.push(key);
             }
         }
-        
+
         if (keys.length > 10) { // 只有当有足够多的项时才清理
             // 按字母顺序排序，简单处理
             keys.sort();
@@ -2033,20 +2033,20 @@ function initFolderConfigModal() {
     const uploadInput = document.getElementById('uploadFolderInput');
     const resultsInput = document.getElementById('resultsFolderInput');
     const saveBtn = document.getElementById('saveFolderConfigBtn');
-    
+
     // 打开对话框时填充当前配置
     modal.addEventListener('show.bs.modal', function() {
         uploadInput.value = folderConfig.upload_folder || '';
         resultsInput.value = folderConfig.results_folder || '';
     });
-    
+
     // 保存按钮点击事件
     saveBtn.addEventListener('click', async function() {
         const uploadFolder = uploadInput.value.trim();
         const resultsFolder = resultsInput.value.trim();
-        
+
         await setFolderConfig(uploadFolder, resultsFolder);
-        
+
         // 关闭对话框
         const bsModal = bootstrap.Modal.getInstance(modal);
         bsModal.hide();
@@ -2061,10 +2061,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     prefillTargetLabels();
     initializeEventListeners();
     updateSegmentButton();
-    
+
     // 获取文件夹配置
     await getFolderConfig();
-    
+
     // 初始化文件夹配置对话框
     initFolderConfigModal();
 
