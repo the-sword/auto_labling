@@ -24,6 +24,10 @@ from transformers import AutoModelForMaskGeneration, AutoProcessor, pipeline
 import file_utils
 import crawler
 
+# 导入推理引擎配置
+import inference_config
+from unified_inference import get_unified_engine
+
 # ================= augmentation =================
 from threading import Event
 
@@ -230,6 +234,34 @@ def detect(image: Image.Image, labels: List[str], threshold: float = 0.3) -> Lis
     # 取消框级NMS，保留所有候选，后续在mask层级进行冲突消解
     return results
 
+def detect_batch(images: List[Image.Image], labels: List[str], threshold: float = 0.3) -> List[List[DetectionResult]]:
+    """Batch variant of Grounding DINO detection for multiple images at once.
+    Returns a list aligned with `images`, each item being a list of DetectionResult.
+    """
+    global object_detector
+
+    if object_detector is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models/grounding-dino-tiny")
+        object_detector = pipeline(
+            model=model_path,
+            task="zero-shot-object-detection",
+            device=device,
+            local_files_only=True
+        )
+
+    labels = [label if label.endswith(".") else label+"." for label in labels]
+    # Transformers pipelines support list inputs for batching
+    raw_results = object_detector(images, candidate_labels=labels, threshold=threshold)
+    # Ensure we have a per-image list of detections
+    if isinstance(raw_results, dict):
+        raw_results = [raw_results]
+    results_batched: List[List[DetectionResult]] = []
+    for per_image in raw_results:
+        per_image = per_image or []
+        results_batched.append([DetectionResult.from_dict(r) for r in per_image])
+    return results_batched
+
 def segment(image: Image.Image, detection_results: List[DetectionResult], polygon_refinement: bool = False,
             mask_iou_threshold: float = 0.5,
             poly_simplify_eps: float = 2.0,
@@ -270,6 +302,65 @@ def segment(image: Image.Image, detection_results: List[DetectionResult], polygo
 
     return detection_results
 
+def segment_batch(images: List[Image.Image], detections_per_image: List[List[DetectionResult]],
+                  polygon_refinement: bool = False, mask_iou_threshold: float = 0.5,
+                  poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> List[List[DetectionResult]]:
+    """Batch variant of SAM segmentation.
+    - images: list of PIL Images
+    - detections_per_image: list aligned with images, each a list of DetectionResult with boxes set
+    Returns detections with `mask` filled; also applies mask-level NMS per image.
+    """
+    global segmentator, processor
+
+    if segmentator is None or processor is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Device set to use {device}")
+        sam_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models/sam-vit-base")
+        segmentator = AutoModelForMaskGeneration.from_pretrained(sam_path, local_files_only=True).to(device)
+        processor = AutoProcessor.from_pretrained(sam_path, local_files_only=True)
+
+    # Build a subset of images that actually have boxes
+    proc_images: List[Image.Image] = []
+    proc_boxes: List[List[List[float]]] = []
+    idx_map: List[int] = []
+    for idx, (img, dets) in enumerate(zip(images, detections_per_image)):
+        if dets:
+            boxes = get_boxes(dets)
+            if len(boxes) > 0:
+                proc_images.append(img)
+                proc_boxes.append(boxes)
+                idx_map.append(idx)
+
+    # Early return if nothing to process
+    if len(proc_images) == 0:
+        # Still apply mask-level NMS on empty lists for consistency
+        return [mask_level_nms(d, mask_iou_threshold=mask_iou_threshold) if d else [] for d in detections_per_image]
+
+    inputs = processor(images=proc_images, input_boxes=proc_boxes, return_tensors="pt").to(segmentator.device)
+    with torch.no_grad():
+        outputs = segmentator(**inputs)
+
+    masks_list = processor.post_process_masks(
+        masks=outputs.pred_masks,
+        original_sizes=inputs.original_sizes,
+        reshaped_input_sizes=inputs.reshaped_input_sizes
+    )
+
+    # Assign masks back to detections
+    for mapped_i, masks in enumerate(masks_list):
+        dets = detections_per_image[idx_map[mapped_i]]
+        masks_np = refine_masks(masks, polygon_refinement, poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps)
+        for d, m in zip(dets, masks_np):
+            d.mask = m
+
+    # Apply per-image mask NMS and return
+    result_batched: List[List[DetectionResult]] = []
+    for dets in detections_per_image:
+        if dets:
+            dets = mask_level_nms(dets, mask_iou_threshold=mask_iou_threshold)
+        result_batched.append(dets)
+    return result_batched
+
 def grounded_segmentation(image_data: bytes, labels: List[str], threshold: float = 0.3,
                           polygon_refinement: bool = False, mask_iou_threshold: float = 0.5,
                           poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Tuple[np.ndarray, List[DetectionResult]]:
@@ -280,6 +371,80 @@ def grounded_segmentation(image_data: bytes, labels: List[str], threshold: float
                          poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps)
     # print(f"detections: {detections}")
     return np.array(image), detections
+
+def grounded_segmentation_batch(image_datas: List[bytes], labels: List[str], threshold: float = 0.3,
+                                 polygon_refinement: bool = False, mask_iou_threshold: float = 0.5,
+                                 poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Tuple[List[np.ndarray], List[List[DetectionResult]]]:
+    """End-to-end batched grounded segmentation.
+    Returns tuple (images_np_list, detections_per_image).
+    """
+    images = [load_image(b) for b in image_datas]
+    dets_b = detect_batch(images, labels, threshold)
+    dets_b = segment_batch(images, dets_b, polygon_refinement, mask_iou_threshold,
+                           poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps)
+    images_np = [np.array(img) for img in images]
+    return images_np, dets_b
+
+def unified_segmentation(image_data: bytes, labels: List[str], threshold: float = 0.3,
+                         use_unipixel: bool = True,
+                         polygon_refinement: bool = False, mask_iou_threshold: float = 0.5,
+                         poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Tuple[np.ndarray, List[DetectionResult]]:
+    """使用统一推理引擎执行图像分割
+    
+    Args:
+        image_data: 图片字节数据
+        labels: 标签列表
+        threshold: 置信度阈值
+        use_unipixel: 是否使用UniPixel（False则使用Grounding DINO+SAM）
+        polygon_refinement: 多边形优化
+        mask_iou_threshold: mask IoU阈值
+        poly_simplify_eps: 多边形简化参数
+        poly_collinear_eps: 共线点消除参数
+        
+    Returns:
+        (image_array, detections)
+    """
+    if use_unipixel:
+        # 使用UniPixel统一推理引擎
+        unified_engine = get_unified_engine()
+        image = load_image(image_data)
+        detections = unified_engine.segment(image, labels, threshold)
+        return np.array(image), detections
+    else:
+        # 使用原有的Grounding DINO + SAM
+        return grounded_segmentation(image_data, labels, threshold, polygon_refinement, 
+                                    mask_iou_threshold, poly_simplify_eps, poly_collinear_eps)
+
+def unified_segmentation_batch(image_datas: List[bytes], labels: List[str], threshold: float = 0.3,
+                               use_unipixel: bool = True,
+                               polygon_refinement: bool = False, mask_iou_threshold: float = 0.5,
+                               poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Tuple[List[np.ndarray], List[List[DetectionResult]]]:
+    """使用统一推理引擎执行批量图像分割
+    
+    Args:
+        image_datas: 图片字节数据列表
+        labels: 标签列表
+        threshold: 置信度阈值
+        use_unipixel: 是否使用UniPixel
+        polygon_refinement: 多边形优化
+        mask_iou_threshold: mask IoU阈值
+        poly_simplify_eps: 多边形简化参数
+        poly_collinear_eps: 共线点消除参数
+        
+    Returns:
+        (images_np_list, detections_per_image)
+    """
+    if use_unipixel:
+        # 使用UniPixel统一推理引擎
+        unified_engine = get_unified_engine()
+        images = [load_image(b) for b in image_datas]
+        dets_b = unified_engine.segment_batch(images, labels, threshold)
+        images_np = [np.array(img) for img in images]
+        return images_np, dets_b
+    else:
+        # 使用原有的Grounding DINO + SAM
+        return grounded_segmentation_batch(image_datas, labels, threshold, polygon_refinement,
+                                          mask_iou_threshold, poly_simplify_eps, poly_collinear_eps)
 
 def detection_result_to_dict(detection: DetectionResult, poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Dict:
     """将DetectionResult转换为可序列化的字典"""
@@ -329,17 +494,17 @@ def segment_api():
         data = request.get_json()
         image_b64 = data.get('image')
         image_path = data.get('image_path')  # 相对或绝对路径，首选相对 uploads 下
-        if image_b64:
-            image_data = base64.b64decode(image_b64.split(',')[1])
-        elif image_path:
-            image_data = load_image_from_path(image_path)
-        else:
-            return jsonify({'success': False, 'error': 'image or image_path is required'}), 400
+        images_b64 = data.get('images')
+        image_paths = data.get('image_paths')
         labels = data['labels']
         threshold = data.get('threshold', 0.3)
         polygon_refinement = data.get('polygon_refinement', True)
         mask_iou_threshold = float(data.get('mask_iou_threshold', 0.5))
         manual_annotations = data.get('manual_annotations', []) or []
+        
+        # 推理引擎选择（可通过请求参数指定，默认使用配置的引擎）
+        engine = data.get('engine', inference_config.get_inference_engine())
+        use_unipixel = (engine == 'unipixel')
 
         # 读取多边形简化参数
         try:
@@ -351,9 +516,145 @@ def segment_api():
         except Exception:
             poly_collinear_eps = 1.0
 
-        # 执行分割（自动检测+分割）
-        image_array, detections = grounded_segmentation(
-            image_data, labels, threshold, polygon_refinement, mask_iou_threshold,
+        # 如果提供了批量输入，走批处理路径
+        if isinstance(images_b64, list) or isinstance(image_paths, list):
+            bytes_list: List[bytes] = []
+            source_paths: List[Optional[str]] = []
+            if isinstance(images_b64, list) and len(images_b64) > 0:
+                for s in images_b64:
+                    if not s:
+                        bytes_list.append(None)  # type: ignore[arg-type]
+                        source_paths.append(None)
+                        continue
+                    try:
+                        # 支持 data URL 或纯 base64
+                        if isinstance(s, str) and ',' in s:
+                            b = base64.b64decode(s.split(',', 1)[1])
+                        else:
+                            b = base64.b64decode(s)
+                        bytes_list.append(b)
+                        source_paths.append(None)
+                    except Exception:
+                        bytes_list.append(None)
+                        source_paths.append(None)
+            elif isinstance(image_paths, list) and len(image_paths) > 0:
+                for p in image_paths:
+                    try:
+                        b = load_image_from_path(p)
+                        bytes_list.append(b)
+                        source_paths.append(p)
+                    except Exception:
+                        bytes_list.append(None)
+                        source_paths.append(p)
+            else:
+                return jsonify({'success': False, 'error': 'images or image_paths must be a non-empty list'}), 400
+
+            # 过滤掉无效项，同时保留索引映射
+            idx_map: List[int] = []
+            valid_bytes: List[bytes] = []
+            valid_paths: List[Optional[str]] = []
+            for i, b in enumerate(bytes_list):
+                if b is not None:
+                    idx_map.append(i)
+                    valid_bytes.append(b)
+                    valid_paths.append(source_paths[i])
+
+            if len(valid_bytes) == 0:
+                return jsonify({'success': False, 'error': 'no valid images to process'}), 400
+
+            images_np, dets_list = unified_segmentation_batch(
+                valid_bytes, labels, threshold, use_unipixel,
+                polygon_refinement, mask_iou_threshold,
+                poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps
+            )
+
+            # 手动标注（批量）支持：manual_annotations 为与输入等长的列表
+            if isinstance(manual_annotations, list) and any(isinstance(x, list) for x in manual_annotations):
+                # 期望形如 [[ann...], [ann...], ...]
+                for local_idx, anns in enumerate(manual_annotations[:len(idx_map)]):
+                    try:
+                        h, w = int(Image.fromarray(images_np[local_idx]).height), int(Image.fromarray(images_np[local_idx]).width)
+                    except Exception:
+                        h, w = int(images_np[local_idx].shape[0]), int(images_np[local_idx].shape[1])
+                    for ann in anns or []:
+                        polygon = ann.get('polygon') or []
+                        if not isinstance(polygon, list) or len(polygon) < 3:
+                            continue
+                        label = str(ann.get('label', 'manual'))
+                        try:
+                            score = float(ann.get('score', 1.0))
+                        except Exception:
+                            score = 1.0
+                        box_dict = ann.get('box') or {}
+                        if not all(k in box_dict for k in ('xmin', 'ymin', 'xmax', 'ymax')):
+                            xs = [int(p[0]) for p in polygon]
+                            ys = [int(p[1]) for p in polygon]
+                            box_dict = {
+                                'xmin': int(max(0, min(xs))),
+                                'ymin': int(max(0, min(ys))),
+                                'xmax': int(min(w - 1, max(xs))),
+                                'ymax': int(min(h - 1, max(ys)))
+                            }
+                        box = BoundingBox(xmin=int(box_dict['xmin']), ymin=int(box_dict['ymin']), xmax=int(box_dict['xmax']), ymax=int(box_dict['ymax']))
+                        mask = polygon_to_mask([(int(p[0]), int(p[1])) for p in polygon], (h, w))
+                        mask = (mask > 0).astype(np.uint8)
+                        det = DetectionResult(score=score, label=label, box=box, mask=mask)
+                        setattr(det, 'is_manual', True)
+                        dets_list[local_idx].append(det)
+
+            # 每张图像独立做 mask-level NMS、编码返回
+            items = []
+            for local_idx, (img_np, dets) in enumerate(zip(images_np, dets_list)):
+                dets = mask_level_nms(dets, mask_iou_threshold=mask_iou_threshold)
+                results = [detection_result_to_dict(d, poly_simplify_eps, poly_collinear_eps) for d in dets]
+                image_pil = Image.fromarray(img_np)
+                buffer = io.BytesIO()
+                image_pil.save(buffer, format='PNG')
+                image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+                # 可选自动保存（仅当对应路径存在时）
+                save_result = None
+                src_path = valid_paths[local_idx]
+                if src_path:
+                    try:
+                        save_params = {
+                            'image_path': src_path,
+                            'detections': results,
+                            'params': {
+                                'threshold': threshold,
+                                'polygon_refinement': polygon_refinement,
+                                'mask_iou_threshold': mask_iou_threshold,
+                                'polygon_simplify_epsilon': poly_simplify_eps,
+                                'polygon_collinear_epsilon': poly_collinear_eps
+                            },
+                            'save_subdir': 'auto_save'
+                        }
+                        save_result = file_utils.save_segmentation_result(
+                            image_path=save_params.get('image_path'),
+                            detections=save_params.get('detections') or [],
+                            params=save_params.get('params') or {},
+                            save_subdir=save_params.get('save_subdir') or ''
+                        )
+                    except Exception as e:
+                        print(f"自动保存失败: {str(e)}")
+                        save_result = {'success': False, 'error': str(e)}
+
+                items.append({'image': image_base64, 'detections': results, 'auto_save_result': save_result})
+
+            return jsonify({'success': True, 'items': items})
+
+        # 否则，走单图路径（向后兼容）
+        if image_b64:
+            image_data = base64.b64decode(image_b64.split(',')[1])
+        elif image_path:
+            image_data = load_image_from_path(image_path)
+        else:
+            return jsonify({'success': False, 'error': 'image or image_path is required'}), 400
+
+        # 执行分割（使用统一推理引擎）
+        image_array, detections = unified_segmentation(
+            image_data, labels, threshold, use_unipixel,
+            polygon_refinement, mask_iou_threshold,
             poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps
         )
 
@@ -442,12 +743,7 @@ def segment_api():
                 print(f"自动保存失败: {str(e)}")
                 save_result = {'success': False, 'error': str(e)}
 
-        return jsonify({
-            'success': True,
-            'image': image_base64,
-            'detections': results,
-            'auto_save_result': save_result
-        })
+        return jsonify({'success': True, 'image': image_base64, 'detections': results, 'auto_save_result': save_result})
 
     except Exception as e:
         return jsonify({

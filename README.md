@@ -2,6 +2,14 @@
 
 基于Grounding DINO和Segment Anything Model (SAM)的文本引导图像分割Web应用。
 
+## 🆕 UniPixel集成
+
+现已支持[UniPixel](https://github.com/PolyU-ChenLab/UniPixel)推理引擎，提供更强大的端到端分割能力！
+
+- 查看快速开始：[QUICKSTART_UNIPIXEL.md](QUICKSTART_UNIPIXEL.md)
+- 完整文档：[UNIPIXEL_INTEGRATION.md](UNIPIXEL_INTEGRATION.md)
+- 集成总结：[INTEGRATION_SUMMARY.md](INTEGRATION_SUMMARY.md)
+
 ## 功能特点
 
 - 🎯 **文本引导分割**: 通过自然语言描述来分割图像中的目标对象
@@ -16,8 +24,9 @@
 ### 后端
 - **Flask**: Web框架
 - **Transformers**: Hugging Face模型库
-- **Grounding DINO**: 零样本目标检测
-- **SAM**: Segment Anything Model
+- **推理引擎** (可选其一):
+  - **Grounding DINO + SAM**: 两阶段检测分割
+  - **UniPixel** (新): 端到端统一模型，基于Qwen2.5-VL
 - **OpenCV**: 图像处理
 - **PyTorch**: 深度学习框架
 
@@ -30,24 +39,32 @@
 
 ## 安装和运行
 
-### 1. 环境要求
-
-- Python 3.8+
-- CUDA支持（可选，用于GPU加速）
-
-### 2. 安装依赖
+### 方式1: 使用Grounding DINO + SAM (原有方案)
 
 ```bash
+# 1. 安装依赖
 pip install -r requirements.txt
+
+# 2. 运行应用
+python app.py
 ```
 
-### 3. 运行应用
+### 方式2: 使用UniPixel (推荐)
 
 ```bash
+# 1. 安装UniPixel依赖
+bash setup_unipixel.sh
+
+# 2. 设置使用UniPixel引擎
+export INFERENCE_ENGINE=unipixel
+
+# 3. 运行应用
 python app.py
 ```
 
 应用将在 `http://localhost:5000` 启动。
+
+**详细安装指南**: 查看 [QUICKSTART_UNIPIXEL.md](QUICKSTART_UNIPIXEL.md)
 
 ## 使用说明
 
