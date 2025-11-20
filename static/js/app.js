@@ -572,6 +572,7 @@ const batchBtn = document.getElementById('batchBtn');
 const queueInfo = document.getElementById('queueInfo');
 const saveBtn = document.getElementById('saveBtn');
 const saveSubdirInput = document.getElementById('saveSubdirInput');
+const engineSelect = document.getElementById('engineSelect');
 
 // 手动标注状态
 let isAnnotating = false;
@@ -1087,6 +1088,9 @@ async function performSegmentation() {
             polygon_collinear_epsilon: polyCollinearSlider ? parseFloat(polyCollinearSlider.value) : 1.0,
             manual_annotations: manualAnnotations
         };
+        if (engineSelect && engineSelect.value) {
+            payload.engine = engineSelect.value;
+        }
         if (queueItem && queueItem.serverPath) {
             payload.image_path = queueItem.serverPath;
         } else {

@@ -390,7 +390,7 @@ def unified_segmentation(image_data: bytes, labels: List[str], threshold: float 
                          polygon_refinement: bool = False, mask_iou_threshold: float = 0.5,
                          poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Tuple[np.ndarray, List[DetectionResult]]:
     """使用统一推理引擎执行图像分割
-    
+
     Args:
         image_data: 图片字节数据
         labels: 标签列表
@@ -400,7 +400,7 @@ def unified_segmentation(image_data: bytes, labels: List[str], threshold: float 
         mask_iou_threshold: mask IoU阈值
         poly_simplify_eps: 多边形简化参数
         poly_collinear_eps: 共线点消除参数
-        
+
     Returns:
         (image_array, detections)
     """
@@ -412,7 +412,7 @@ def unified_segmentation(image_data: bytes, labels: List[str], threshold: float 
         return np.array(image), detections
     else:
         # 使用原有的Grounding DINO + SAM
-        return grounded_segmentation(image_data, labels, threshold, polygon_refinement, 
+        return grounded_segmentation(image_data, labels, threshold, polygon_refinement,
                                     mask_iou_threshold, poly_simplify_eps, poly_collinear_eps)
 
 def unified_segmentation_batch(image_datas: List[bytes], labels: List[str], threshold: float = 0.3,
@@ -420,7 +420,7 @@ def unified_segmentation_batch(image_datas: List[bytes], labels: List[str], thre
                                polygon_refinement: bool = False, mask_iou_threshold: float = 0.5,
                                poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Tuple[List[np.ndarray], List[List[DetectionResult]]]:
     """使用统一推理引擎执行批量图像分割
-    
+
     Args:
         image_datas: 图片字节数据列表
         labels: 标签列表
@@ -430,7 +430,7 @@ def unified_segmentation_batch(image_datas: List[bytes], labels: List[str], thre
         mask_iou_threshold: mask IoU阈值
         poly_simplify_eps: 多边形简化参数
         poly_collinear_eps: 共线点消除参数
-        
+
     Returns:
         (images_np_list, detections_per_image)
     """
@@ -501,10 +501,21 @@ def segment_api():
         polygon_refinement = data.get('polygon_refinement', True)
         mask_iou_threshold = float(data.get('mask_iou_threshold', 0.5))
         manual_annotations = data.get('manual_annotations', []) or []
-        
+
         # 推理引擎选择（可通过请求参数指定，默认使用配置的引擎）
         engine = data.get('engine', inference_config.get_inference_engine())
-        use_unipixel = (engine == 'unipixel')
+        if engine not in ['grounding_dino_sam', 'unipixel', 'sam3_http']:
+            engine = inference_config.get_inference_engine()
+        use_unipixel = (engine != 'grounding_dino_sam')
+
+        # 对统一推理引擎（UniPixel / SAM3 HTTP 等）按请求切换后端
+        if use_unipixel:
+            try:
+                inference_config.set_inference_engine(engine)
+                unified_engine = get_unified_engine()
+                unified_engine.reload()
+            except Exception as e:
+                print(f"Failed to switch inference engine to {engine}: {e}")
 
         # 读取多边形简化参数
         try:
@@ -713,7 +724,7 @@ def segment_api():
         buffer = io.BytesIO()
         image_pil.save(buffer, format='PNG')
         image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
+
         # 自动保存原图和JSON文件
         save_result = None
         if image_path:
@@ -731,7 +742,7 @@ def segment_api():
                     },
                     'save_subdir': 'auto_save'  # 自动保存到 results/auto_save 目录
                 }
-                
+
                 # 调用保存逻辑 - 使用file_utils模块
                 save_result = file_utils.save_segmentation_result(
                     image_path=save_params.get('image_path'),
@@ -933,12 +944,12 @@ def crawl_stream_api():
 @app.route('/api/config/folders', methods=['GET', 'POST'])
 def config_folders_api():
     """获取或设置文件夹配置
-    
+
     GET: 获取当前文件夹配置
     POST: 设置新的文件夹配置
     """
     global UPLOAD_FOLDER, RESULTS_FOLDER
-    
+
     if request.method == 'GET':
         # 返回当前配置
         folders = file_utils.get_current_folders()
@@ -951,21 +962,21 @@ def config_folders_api():
         data = request.get_json()
         upload_folder = data.get('upload_folder')
         results_folder = data.get('results_folder')
-        
+
         # 验证路径安全性
         if upload_folder and not os.path.isabs(upload_folder):
             upload_folder = os.path.join(BASE_DIR, upload_folder)
-        
+
         if results_folder and not os.path.isabs(results_folder):
             results_folder = os.path.join(BASE_DIR, results_folder)
-            
+
         # 配置文件夹
         result = file_utils.configure_folders(upload_folder, results_folder)
-        
+
         # 更新全局变量
         UPLOAD_FOLDER = result['upload_folder']
         RESULTS_FOLDER = result['results_folder']
-        
+
         return jsonify({
             'success': True,
             'message': '文件夹配置已更新',
@@ -980,12 +991,12 @@ def upload_api():
     """
     if 'files' not in request.files:
         return jsonify({'success': False, 'error': 'no files field'}), 400
-    
+
     files = request.files.getlist('files')
     rel_list = request.form.getlist('relative_paths') or []
     use_rel = len(rel_list) == len(files) and len(files) > 0
     saved = []
-    
+
     if use_rel:
         # 使用相对路径保存文件
         for idx, f in enumerate(files):
@@ -1004,7 +1015,7 @@ def upload_api():
             for file_info in result['files']:
                 file_info['url'] = url_for('serve_uploads', filename=file_info['path'], _external=False)
             saved = result.get('files', [])
-    
+
     return jsonify({'success': True, 'files': saved})
 
 @app.route('/uploads/<path:filename>')
@@ -1051,7 +1062,7 @@ def save_result_api():
         image_path = data.get('image_path')
         if not image_path:
             return jsonify({'success': False, 'error': 'image_path required'}), 400
-        
+
         detections_data = data.get('detections') or []
         # Remove trailing period from labels before saving
         for det in detections_data:
@@ -1065,7 +1076,7 @@ def save_result_api():
             params=data.get('params') or {},
             save_subdir=data.get('save_subdir') or ''
         )
-        
+
         if result['success']:
             return jsonify(result)
         else:
@@ -1108,17 +1119,17 @@ def augment_and_save(sample_dir: str, bg_dir: str, class_name: str, out_dir: str
         extracted_objects = []
         for i, sample_path in enumerate(sample_files):
             if AUGMENT_STOP_EVENT.is_set(): return
-            
+
             with open(sample_path, 'rb') as f:
                 img_data = f.read()
-            
+
             _, detections = grounded_segmentation(img_data, [class_name], threshold=threshold, mask_iou_threshold=0.7)
-            
+
             for det in detections:
                 if det.label.strip('.') == class_name and det.mask is not None:
                     img = Image.open(io.BytesIO(img_data)).convert("RGBA")
                     mask = Image.fromarray(det.mask.astype(np.uint8) * 255).convert('L')
-                    
+
                     # 裁切 bbox 区域，应用蒙版
                     obj_img = Image.new("RGBA", img.size)
                     obj_img.paste(img, mask=mask)
@@ -1131,7 +1142,7 @@ def augment_and_save(sample_dir: str, bg_dir: str, class_name: str, out_dir: str
                     cropped_obj.save(buffer, format='PNG')
                     img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
                     yield _augment_sse_event('segmented_object', {'image': f"data:image/png;base64,{img_base64}"})
-            
+
             progress = 15 + int(35 * (i + 1) / len(sample_files))
             yield _augment_sse_event('progress', {'message': f'已处理 {i+1}/{len(sample_files)} 个样本', 'progress': progress})
 
@@ -1141,7 +1152,7 @@ def augment_and_save(sample_dir: str, bg_dir: str, class_name: str, out_dir: str
         # 3. 生成增强图片
         yield _augment_sse_event('progress', {'message': f'共提取到 {len(extracted_objects)} 个物体，开始生成增强图片...', 'progress': 50})
         num_to_generate = min(len(extracted_objects) * 5, 200) # 最多生成200张
-        
+
         for i in range(num_to_generate):
             if AUGMENT_STOP_EVENT.is_set(): return
 
@@ -1149,11 +1160,11 @@ def augment_and_save(sample_dir: str, bg_dir: str, class_name: str, out_dir: str
             background = _load_image_from_any_path(bg_path)
             if not background:
                 continue
-            
+
             # 随机选择一个或多个物体进行粘贴
             num_objects = random.randint(1, min(len(extracted_objects), 3))
             selected_objects = random.sample(extracted_objects, num_objects)
-            
+
             new_detections = []
             current_bg = background.copy()
 
@@ -1229,7 +1240,7 @@ def augment_stream_api():
             if not out_dir:
                 safe_name = file_utils.sanitize_filename(class_name) or 'augmented'
                 out_dir = os.path.join(RESULTS_FOLDER, 'augmented_data', safe_name)
-            
+
             AUGMENT_STOP_EVENT.clear()
             gen = augment_and_save(sample_dir, bg_dir, class_name, out_dir, threshold=threshold)
 

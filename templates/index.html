@@ -64,6 +64,17 @@
                     <div class="settings-section mb-4">
                         <h5><i class="fas fa-cog"></i> 参数设置</h5>
                         <div class="row g-2">
+                            <div class="col-12">
+                                <div class="mb-2">
+                                    <label for="engineSelect" class="form-label">推理引擎</label>
+                                    <select class="form-select" id="engineSelect">
+                                        <option value="">默认（后端配置）</option>
+                                        <option value="unipixel">UniPixel</option>
+                                        <option value="sam3_http">SAM3 (HTTP)</option>
+                                        <option value="grounding_dino_sam">Grounding DINO + SAM</option>
+                                    </select>
+                                </div>
+                            </div>
                             <div class="col-6">
                                 <div class="mb-2">
                                     <label for="thresholdSlider" class="form-label">检测阈值: <span id="thresholdValue">0.3</span></label>
