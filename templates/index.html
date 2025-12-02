@@ -42,7 +42,7 @@
                             <div class="upload-content">
                                 <i class="fas fa-cloud-upload-alt fa-3x mb-3"></i>
                                 <p>拖拽图片/点击或拖拽文件夹到此处（支持多选）</p>
-                                <input type="file" id="imageInput" accept="image/*" multiple webkitdirectory directory style="display: none;">
+                                <input type="file" id="imageInput" accept="image/*" multiple style="display: none;">
                             </div>
                         </div>
                         <div class="small text-muted mt-2" id="queueInfo" style="display:none;"></div>
@@ -112,21 +112,23 @@
 
                     <!-- 操作按钮 -->
                     <div class="actions-section">
-                        <button class="btn btn-primary w-100 mb-2" id="segmentBtn" disabled>
-                            <i class="fas fa-play"></i> 开始分割
-                        </button>
-                        <button class="btn btn-outline-success w-100 mb-2" id="batchBtn" disabled>
-                            <i class="fas fa-layer-group"></i> 批量分割（对队列中所有图片）
-                        </button>
-                        <button class="btn btn-outline-primary w-100 mb-2" id="annotateToggleBtn">
-                            <i class="fas fa-draw-polygon"></i> 手动标注模式
-                        </button>
-                        <button class="btn btn-outline-secondary w-100" id="clearBtn">
-                            <i class="fas fa-trash"></i> 清除结果
-                        </button>
-                        <button class="btn btn-link w-100 mt-2" id="helpBtn">
-                            <i class="fas fa-question-circle"></i> 使用提示
-                        </button>
+                        <div class="d-flex flex-wrap gap-1 actions-btn-group">
+                            <button class="btn btn-primary btn-sm flex-fill" id="segmentBtn" disabled>
+                                <i class="fas fa-play"></i> 开始分割
+                            </button>
+                            <button class="btn btn-outline-success btn-sm flex-fill" id="batchBtn" disabled>
+                                <i class="fas fa-layer-group"></i> 批量分割（对队列中所有图片）
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm flex-fill" id="annotateToggleBtn">
+                                <i class="fas fa-draw-polygon"></i> 手动标注模式
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm flex-fill" id="clearBtn">
+                                <i class="fas fa-trash"></i> 清除结果
+                            </button>
+                            <button class="btn btn-link btn-sm flex-fill text-start" id="helpBtn">
+                                <i class="fas fa-question-circle"></i> 使用提示
+                            </button>
+                        </div>
                     </div>
 
                     <!-- 示例标签 -->
@@ -139,17 +141,17 @@
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">adult</span>
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">pet</span>
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">leaf</span>
-                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">charging station</span>
-                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">manhole cover</span>
+                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">chargingstation</span>
+                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">manholecover</span>
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">water</span>
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">flatstone</span>
-                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">Flat spray can</span>
+                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">flatspraycan</span>
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">pipeline</span>
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">mud</span>
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">child</span>
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">hedgehog</span>
-                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">fruilt</span>
-                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">green plants</span>
+                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">fruit</span>
+                            <span class="badge bg-light text-dark me-1 mb-1 example-tag">greenplants</span>
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">grass</span>
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">road</span>
                             <span class="badge bg-light text-dark me-1 mb-1 example-tag">background</span>
@@ -380,7 +382,7 @@
                             <li>可直接在画布点击目标进行选中与编辑，无需进入手动标注模式。</li>
                             <li>Ctrl + 点击多边形边缘 在该边插入一个新顶点，插入后可立即拖拽调整。</li>
                             <li>拖动顶点 可微调形状，拖拽结束后会更新边框与显示。</li>
-                            <li>Alt + 点击顶点 删除该点（多边形至少保留 3 个点）。</li>
+                            <li>Shift + 点击顶点 删除该点（多边形至少保留 3 个点）。</li>
                             <li>Backspace/Delete 删除最后一个点（选中状态下）。</li>
                         </ul>
                     </div>

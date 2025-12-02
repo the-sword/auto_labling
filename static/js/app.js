@@ -585,21 +585,21 @@ const PREDEFINED_LABELS = [
     'fence',
     'adult',
     'pet',
-    'leaf',
-    'charging station',
-    'manhole cover',
+    // 'leaf',
+    'chargingstation',
+    'manholecover',
     'water',
     'flatstone',
-    'Flat spray can',
+    'flatspraycan',
     'pipeline',
     'mud',
     'child',
     'hedgehog',
-    'fruilt',
-    'green plants',
+    'fruit',
+    'greenplants',
     'grass',
-    'road',
-    'background'
+    'road'
+    // 'background'
 ];
 
 // 规范化标签显示：去掉末尾句点（中英文）并去除首尾空白
@@ -1479,8 +1479,8 @@ function enableCanvasInteractions() {
         if (selectedDetectionIndex == null) {
             const hitIdx = findDetectionAtPoint(pos.x, pos.y);
             if (hitIdx !== -1) {
-                // 直接设置索引以便本次事件后续逻辑可继续使用（避免需要再次点击）
-                selectedDetectionIndex = hitIdx;
+                // 使用统一的选择逻辑，确保结果列表高亮同步更新
+                selectDetection(hitIdx);
             } else {
                 return; // 未点中任何目标
             }
@@ -1503,26 +1503,27 @@ function enableCanvasInteractions() {
             }
         }
 
-        // Alt+点击已存在多边形的顶点 -> 删除该点（编辑已有分割）
-        if (evt.altKey) {
-            const vIdx = findNearbyVertex(det.polygon, pos.x, pos.y, 8);
-            if (vIdx !== -1) {
-                if (det.polygon.length <= 3) {
-                    showError('多边形至少需要3个点');
-                    return;
-                }
-                det.polygon.splice(vIdx, 1);
-                // 更新bbox
-                updateBoxFromPolygon(det);
-                // 变更需要重建底图
-                baseRenderReady = false;
-                buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
+        // 先检测是否点中某个顶点（优先处理Shift删除）
+        const vIdx = findNearbyVertex(det.polygon, pos.x, pos.y, 8);
+
+        // Shift+点击已存在多边形的顶点 -> 删除该点（编辑已有分割）
+        if (evt.shiftKey && vIdx !== -1) {
+            if (det.polygon.length <= 3) {
+                showError('多边形至少需要3个点');
                 return;
             }
+            det.polygon.splice(vIdx, 1);
+            // 更新bbox
+            updateBoxFromPolygon(det);
+            // 变更需要重建底图
+            baseRenderReady = false;
+            buildBaseLayer(lastResultImageBase64, detectionResults).then(() => drawFromBaseLayer());
+            // 保存修改后的结果
+            saveCurrentResultsToStorage();
+            return;
         }
 
-        // 先检测是否点中某个顶点
-        const vIdx = findNearbyVertex(det.polygon, pos.x, pos.y, 8);
+        // 普通顶点拖拽（非Alt模式）
         if (vIdx !== -1) {
             isDraggingVertex = true;
             draggingVertexIndex = vIdx;

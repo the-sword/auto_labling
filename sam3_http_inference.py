@@ -15,34 +15,122 @@ import inference_config
 # UI to keep a compact set of class names while SAM3 sees more
 # descriptive phrases that are easier to understand.
 PROMPT_GROUPS = {
-    "obstacle": [
-        "obstacle",
-        "traffic cone",
-        "traffic safety cone",
-        "parking cone",
-        "road cone",
-        "traffic bollard",
-        "road barrier",
+    # 0 背景 background
+    "background": [
+        "background",
+        "background area",
+        "non-interest region in the image",
     ],
-    "dung": [
-        "dung",
+
+    # 1 障碍物 obstacle
+    "obstacle": [
+        "box",
+        "trunk",
+        "branch",
+        "bush",
+        "shrub",
+        "rock",
+        "stone",
+        "outdoor furniture",
+        "garden furniture",
+        "table",
+        "chair",
+        "picnic blanket",
+        "children toy",
+        "toy car",
+        "ball",
+        "small animal on the lawn",
+        "rabbit",
+        "hamster",
+        "irrigation equipment",
+        "playground equipment",
+        "slide",
+        "swing",
+        "statue",
+        "trash bin",
+        "mailbox",
+        "pole",
+        "construction sign",
+        "garden tool on the ground",
+    ],
+
+    # 2 粪便 stool  （兼容旧标签 dung）
+    "stool": [
+        "pet stool",
+        "pet feces",
+        "animal stool",
+        "animal feces",
+        "animal droppings",
+        "poop on the grass",
+        "poop on the ground",
+    ],
+    "dung": [  # backward-compatible alias
+        "pet stool",
         "animal dung",
         "animal feces",
         "animal droppings",
         "poop on the ground",
     ],
+
+    # 3 平式喷罐头 flatspraycan  （兼容旧标签 flat spray can）
+    "flatspraycan": [
+        "flat spray can",
+        "spray can lying on the ground",
+        "spray paint can lying flat",
+    ],
+    "flat spray can": [
+        "flat spray can",
+        "spray can lying on the ground",
+        "spray paint can lying flat",
+    ],
+
+    # 4 管线 pipeline
+    "pipeline": [
+        "pipeline",
+        "cable on the ground",
+        "electric cable",
+        "water pipe",
+        "garden hose",
+        "hose on the ground",
+        "rope on the ground",
+    ],
+
+    # 5 栅栏 fence
     "fence": [
         "fence",
-        "wire fence",
-        "metal fence",
         "wooden fence",
+        "metal fence",
+        "wire fence",
+        "garden fence",
+        "yard fence",
+        "barrier fence",
     ],
+
+    # 6 泥土 mud
+    "mud": [
+        "mud",
+        "muddy ground",
+        "bare soil",
+        "exposed soil",
+    ],
+
+    # 7 成人 adult
     "adult": [
         "adult",
         "adult person",
         "man",
         "woman",
     ],
+
+    # 8 儿童 child
+    "child": [
+        "child",
+        "kid",
+        "little boy",
+        "little girl",
+    ],
+
+    # 9 宠物 pet
     "pet": [
         "pet",
         "dog",
@@ -50,73 +138,108 @@ PROMPT_GROUPS = {
         "pet dog",
         "pet cat",
     ],
-    "leaf": [
-        "leaf",
-        "fallen leaf",
-        "tree leaf",
-    ],
-    "charging station": [
-        "charging station",
-        "ev charging station",
-        "ev charging pile",
-    ],
-    "manhole cover": [
-        "manhole cover",
-        "sewer cover",
-    ],
-    "water": [
-        "water puddle",
-        "water on the ground",
-        "puddle",
-    ],
-    "flatstone": [
-        "flat stone",
-        "flagstone",
-        "stone slab",
-    ],
-    "flat spray can": [
-        "flat spray can",
-        "spray can lying on the ground",
-        "spray paint can",
-    ],
-    "pipeline": [
-        "pipeline",
-        "pipe on the ground",
-    ],
-    "mud": [
-        "mud",
-        "muddy ground",
-    ],
-    "child": [
-        "child",
-        "kid",
-        "little boy",
-        "little girl",
-    ],
+
+    # 10 刺猬 hedgehog
     "hedgehog": [
         "hedgehog",
     ],
-    "fruilt": [
-        "fruilt",
+
+    # 11 落叶 leaf
+    "leaf": [
+        "leaf",
+        "fallen leaf",
+        "fallen leaves",
+        "pile of leaves",
+    ],
+
+    # 12 果实 fruit
+    "fruit": [
         "fruit",
         "fallen fruit",
+        "fallen apple",
+        "fallen apples",
+        "fallen pear",
+        "pine cone",
+    ],
+
+    # 13 充电桩 chargingstation  （兼容 charging station）
+    "chargingstation": [
+        "charging station",
+        "robot mower charging station",
+        "ev charging station",
+        "ev charging pile",
+    ],
+    "charging station": [
+        "charging station",
+        "robot mower charging station",
+        "ev charging station",
+        "ev charging pile",
+    ],
+
+    # 14 类草绿植 greenplants  （兼容 green plants）
+    "greenplants": [
+        "green plants",
+        "ornamental grass",
+        "low green plants",
+        "low shrubs",
+        "flower bed",
     ],
     "green plants": [
         "green plants",
-        "bush",
-        "shrub",
+        "ornamental grass",
+        "low green plants",
+        "low shrubs",
+        "flower bed",
     ],
+
+    # 15 井盖 manholecover  （兼容 manhole cover）
+    "manholecover": [
+        "manhole cover",
+        "round manhole cover",
+        "square manhole cover",
+        "sewer cover",
+    ],
+    "manhole cover": [
+        "manhole cover",
+        "round manhole cover",
+        "square manhole cover",
+        "sewer cover",
+    ],
+
+    # 16 草 grass
     "grass": [
         "grass",
         "lawn",
+        "grass lawn",
+        "grass field",
     ],
+
+    # 17 水面 water
+    "water": [
+        "water puddle",
+        "puddle",
+        "water on the ground",
+        "water surface",
+        "pond water surface",
+        "swimming pool water surface",
+    ],
+
+    # 18 路面 road
     "road": [
-        "road",
+        "road surface",
         "asphalt road",
-        "pathway",
+        "concrete road",
+        "paved road",
+        "paved path",
+        "sidewalk",
     ],
-    "background": [
-        "background",
+
+    # 19 石板 flatstone
+    "flatstone": [
+        "flat stone",
+        "stone slab",
+        "flagstone",
+        "paving stone",
     ],
 }
 
