@@ -502,6 +502,11 @@ def segment_api():
         mask_iou_threshold = float(data.get('mask_iou_threshold', 0.5))
         manual_annotations = data.get('manual_annotations', []) or []
 
+        # 点选分割相关参数
+        points = data.get('points')  # 点坐标列表 [[x1, y1], [x2, y2], ...]
+        point_labels = data.get('point_labels')  # 点标签列表 [1, 0, ...]
+        is_point_mode = data.get('point_mode', False)  # 是否为点选模式
+
         # 推理引擎选择（可通过请求参数指定，默认使用配置的引擎）
         engine = data.get('engine', inference_config.get_inference_engine())
         if engine not in ['grounding_dino_sam', 'unipixel', 'sam3_http']:
@@ -662,12 +667,24 @@ def segment_api():
         else:
             return jsonify({'success': False, 'error': 'image or image_path is required'}), 400
 
-        # 执行分割（使用统一推理引擎）
-        image_array, detections = unified_segmentation(
-            image_data, labels, threshold, use_unipixel,
-            polygon_refinement, mask_iou_threshold,
-            poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps
-        )
+        # 检查是否为点选模式
+        if is_point_mode and points and point_labels and engine == 'sam3_http':
+            # 点选分割模式
+            try:
+                unified_engine = get_unified_engine()
+                image = load_image(image_data)
+                detections = unified_engine.segment_by_points(image, points, point_labels, threshold)
+                image_array = np.array(image)
+            except Exception as e:
+                return jsonify({'success': False, 'error': f'Point segmentation failed: {str(e)}'}), 400
+        else:
+            # 传统标签分割模式
+            # 执行分割（使用统一推理引擎）
+            image_array, detections = unified_segmentation(
+                image_data, labels, threshold, use_unipixel,
+                polygon_refinement, mask_iou_threshold,
+                poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps
+            )
 
         # 将手动标注转换为 DetectionResult，并合并
         try:

@@ -90,6 +90,25 @@ class UnifiedInferenceEngine:
         backend = self._get_backend()
         return backend.segment_batch(images, labels, threshold)
 
+    def segment_by_points(self, image: Image.Image, points: List[List[int]], point_labels: List[int], threshold: float = 0.3) -> List[Any]:
+        """
+        使用点选提示进行分割
+
+        Args:
+            image: PIL图像
+            points: 点坐标列表 [[x1, y1], [x2, y2], ...]
+            point_labels: 点标签列表 [1, 0, ...] (1=前景点, 0=背景点)
+            threshold: 置信度阈值
+
+        Returns:
+            DetectionResult列表
+        """
+        backend = self._get_backend()
+        if hasattr(backend, 'segment_by_points'):
+            return backend.segment_by_points(image, points, point_labels, threshold)
+        else:
+            raise NotImplementedError(f"Backend {self.engine_type} does not support point-based segmentation")
+
     def reload(self):
         """重新加载后端（用于切换引擎）"""
         self._backend = None

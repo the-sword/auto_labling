@@ -312,6 +312,49 @@ class Sam3HTTPInference:
             return []
         return detections
 
+    def _call_remote_points(self, image_b64: str, points: List[List[int]], point_labels: List[int], threshold: float) -> List[dict]:
+        """
+        调用SAM3 HTTP服务进行点选分割
+
+        Args:
+            image_b64: base64编码的图像
+            points: 点坐标列表
+            point_labels: 点标签列表 (1=前景点, 0=背景点)
+            threshold: 置信度阈值
+
+        Returns:
+            检测结果列表
+        """
+        if not self.endpoint:
+            raise RuntimeError("SAM3 HTTP endpoint is not configured")
+
+        payload = {
+            "image": image_b64,
+            "points": points,
+            "labels": point_labels,
+            "threshold": float(threshold),
+        }
+
+        print(f"DEBUG: SAM3 point segmentation payload: {payload}")
+        print(f"DEBUG: Image size: {len(image_b64)} chars")
+        print(f"DEBUG: Points: {points}")
+        print(f"DEBUG: Point labels: {point_labels}")
+
+        resp = requests.post(self.endpoint, json=payload, timeout=self.timeout)
+        resp.raise_for_status()
+        data = resp.json()
+
+        print(f"DEBUG: SAM3 response: {data}")
+
+        if not data.get("success", False):
+            raise RuntimeError(str(data.get("error", "SAM3 HTTP point inference failed")))
+
+        detections = data.get("detections")
+        if not isinstance(detections, list):
+            return []
+        print(f"DEBUG: Returning {len(detections)} detections")
+        return detections
+
     def segment(self, image: Image.Image, labels: List[str], threshold: float = 0.3) -> List[DetectionResult]:
         image_b64 = self._encode_image_to_base64(image)
 
@@ -370,6 +413,51 @@ class Sam3HTTPInference:
             mask_arr = self._decode_mask_from_base64(mask_b64) if mask_b64 else None
 
             results.append(DetectionResult(score=score, label=label, box=box, mask=mask_arr))
+
+        return results
+
+    def segment_by_points(self, image: Image.Image, points: List[List[int]], point_labels: List[int], threshold: float = 0.3) -> List[DetectionResult]:
+        """
+        使用点选提示进行分割
+
+        Args:
+            image: PIL图像
+            points: 点坐标列表 [[x1, y1], [x2, y2], ...]
+            point_labels: 点标签列表 [1, 0, ...] (1=前景点, 0=背景点)
+            threshold: 置信度阈值
+
+        Returns:
+            DetectionResult列表
+        """
+        image_b64 = self._encode_image_to_base64(image)
+        raw_dets = self._call_remote_points(image_b64, points, point_labels, threshold)
+
+        results: List[DetectionResult] = []
+        for det in raw_dets:
+            try:
+                score = float(det.get("score", 0.0))
+            except Exception:
+                score = 0.0
+            if score < threshold:
+                continue
+
+            raw_label = str(det.get("label", "")).strip()
+            if not raw_label:
+                raw_label = "object"  # 点选分割默认标签
+            box_dict = det.get("box") or {}
+            try:
+                xmin = int(box_dict.get("xmin", 0))
+                ymin = int(box_dict.get("ymin", 0))
+                xmax = int(box_dict.get("xmax", 0))
+                ymax = int(box_dict.get("ymax", 0))
+            except Exception:
+                continue
+
+            box = BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
+            mask_b64 = det.get("mask")
+            mask_arr = self._decode_mask_from_base64(mask_b64) if mask_b64 else None
+
+            results.append(DetectionResult(score=score, label=raw_label, box=box, mask=mask_arr))
 
         return results
 
