@@ -7,6 +7,8 @@ let isDraggingVertex = false;      // 是否在拖拽多边形顶点
 let draggingVertexIndex = -1;      // 被拖拽的顶点索引
 let lastResultImageBase64 = null;  // 最近一次结果图像（用于重绘）
 let hoveredDetectionIndex = null;  // 悬浮的分割结果索引（用于联动高亮）
+let showBoundingBoxes = localStorage.getItem('auto_labeling_show_bboxes') !== 'false'; // 是否显示边界框，默认true
+let batchProcessingCancelled = false; // 批量处理取消标志
 let folderConfig = {               // 文件夹配置
     upload_folder: '',
     results_folder: '',
@@ -410,13 +412,13 @@ async function uploadFiles(files) {
 }
 
 // 保存当前图片的分割结果到后台
-async function saveCurrentResults() {
+async function saveCurrentResults(silent = false) {
     const item = imageQueue[currentImageIndex] || null;
     if (!item || !item.serverPath || !Array.isArray(detectionResults) || detectionResults.length === 0) {
-        showError('无可保存的结果或图片未上传到服务器');
+        if (!silent) showError('无可保存的结果或图片未上传到服务器');
         return;
     }
-    showLoading(true);
+    if (!silent) showLoading(true);
     try {
         const resp = await fetch('/api/save_result', {
             method: 'POST',
@@ -436,15 +438,16 @@ async function saveCurrentResults() {
         });
         const data = await resp.json();
         if (!data.success) {
-            showError(data.error || '保存失败');
+            if (!silent) showError(data.error || '保存失败');
             return;
         }
         // 简单提示
-        alert('保存成功');
+        if (!silent) alert('保存成功');
     } catch (err) {
-        showError('保存失败: ' + (err?.message || err));
+        if (!silent) showError('保存失败: ' + (err?.message || err));
+        else console.error('保存失败:', err);
     } finally {
-        showLoading(false);
+        if (!silent) showLoading(false);
         // 保存后再次刷新保存按钮（保持一致）
         updateSegmentButton();
     }
@@ -630,11 +633,37 @@ function generateRandomColor() {
 async function runBatchSegmentation() {
     if (imageQueue.length <= 1) return;
     const startIndex = currentImageIndex >= 0 ? currentImageIndex : 0;
+
+    // 重置取消标志
+    batchProcessingCancelled = false;
+
+    // UI状态切换：隐藏批量按钮，显示停止按钮
+    const batchBtn = document.getElementById('batchBtn');
+    const batchStopBtn = document.getElementById('batchStopBtn');
+    if (batchBtn) batchBtn.style.display = 'none';
+    if (batchStopBtn) batchStopBtn.style.display = 'block';
+
     showLoading(true);
+    let successCount = 0;
+    let failCount = 0;
+
     try {
         for (let i = 0; i < imageQueue.length; i++) {
+            // 检查是否被取消
+            if (batchProcessingCancelled) {
+                showWarning(`批量分割已停止 - 成功处理 ${successCount} 张图片`);
+                break;
+            }
+
             const idx = i; // 顺序处理
             navigateTo(idx);
+
+            // 更新加载提示显示进度
+            const loadingText = document.querySelector('.loading-content p');
+            if (loadingText) {
+                loadingText.textContent = `正在处理第 ${i + 1}/${imageQueue.length} 张图片，请稍候...`;
+            }
+
             // 确保已加载dataURL
             await new Promise(resolve => {
                 if (imageQueue[idx].dataURL) return resolve();
@@ -645,13 +674,58 @@ async function runBatchSegmentation() {
                 };
                 reader.readAsDataURL(imageQueue[idx].file);
             });
+
+            // 再次检查是否被取消（在耗时操作后）
+            if (batchProcessingCancelled) {
+                showWarning(`批量分割已停止 - 成功处理 ${successCount} 张图片`);
+                break;
+            }
+
             currentImage = imageQueue[idx].dataURL;
             await performSegmentation();
+
+            // 自动保存分割结果（静默模式）
+            if (Array.isArray(detectionResults) && detectionResults.length > 0) {
+                try {
+                    await saveCurrentResults(true); // 使用静默模式
+                    successCount++;
+                } catch (saveErr) {
+                    console.error(`保存第${i+1}张图片失败:`, saveErr);
+                    failCount++;
+                }
+            } else {
+                console.log(`第${i+1}张图片无检测结果，跳过保存`);
+                failCount++;
+            }
+        }
+
+        // 只有在非取消状态下才显示完成结果
+        if (!batchProcessingCancelled) {
+            // 显示批量处理结果
+            if (failCount === 0) {
+                showSuccess(`批量分割完成！成功处理 ${successCount} 张图片`);
+            } else {
+                showWarning(`批量分割完成！成功 ${successCount} 张，失败 ${failCount} 张`);
+            }
         }
     } catch (err) {
         showError('批量分割失败：' + (err?.message || err));
     } finally {
         showLoading(false);
+        // 恢复原始加载提示文本
+        const loadingText = document.querySelector('.loading-content p');
+        if (loadingText) {
+            loadingText.textContent = '正在处理中，请稍候...';
+        }
+
+        // 恢复UI状态：显示批量按钮，隐藏停止按钮
+        if (batchBtn) batchBtn.style.display = 'block';
+        if (batchStopBtn) {
+            batchStopBtn.style.display = 'none';
+            batchStopBtn.disabled = false;
+            batchStopBtn.innerHTML = '<i class="fas fa-stop"></i> 停止';
+        }
+
         navigateTo(startIndex);
     }
 }
@@ -691,6 +765,47 @@ function initializeEventListeners() {
     uploadArea.addEventListener('dragleave', handleDragLeave);
     uploadArea.addEventListener('drop', handleDrop);
     imageInput.addEventListener('change', handleImageSelect);
+
+    // 边界框显示开关
+    const bboxToggleBtn = document.getElementById('bboxToggleBtn');
+    if (bboxToggleBtn) {
+        bboxToggleBtn.addEventListener('click', function() {
+            showBoundingBoxes = !showBoundingBoxes;
+
+            // 保存状态到localStorage
+            localStorage.setItem('auto_labeling_show_bboxes', showBoundingBoxes.toString());
+
+            this.classList.toggle('active');
+            this.classList.toggle('btn-warning');
+            this.classList.toggle('btn-outline-warning');
+
+            // 更新按钮文本
+            if (showBoundingBoxes) {
+                this.innerHTML = '<i class="fas fa-border-style"></i> 边界框';
+            } else {
+                this.innerHTML = '<i class="fas fa-border-style"></i> 边界框(隐藏)';
+            }
+
+            // 重新绘制当前结果
+            if (lastResultImageBase64 && detectionResults.length > 0) {
+                baseRenderReady = false;
+                buildBaseLayer(lastResultImageBase64, detectionResults).then(() => {
+                    drawFromBaseLayer();
+                });
+            }
+        });
+
+        // 初始化按钮状态
+        if (showBoundingBoxes) {
+            bboxToggleBtn.classList.add('btn-warning', 'active');
+            bboxToggleBtn.classList.remove('btn-outline-warning');
+            bboxToggleBtn.innerHTML = '<i class="fas fa-border-style"></i> 边界框';
+        } else {
+            bboxToggleBtn.classList.add('btn-outline-warning');
+            bboxToggleBtn.classList.remove('btn-warning', 'active');
+            bboxToggleBtn.innerHTML = '<i class="fas fa-border-style"></i> 边界框(隐藏)';
+        }
+    }
 
     // 标签管理
     addLabelBtn.addEventListener('click', addLabel);
@@ -744,6 +859,11 @@ function initializeEventListeners() {
     if (prevBtn) prevBtn.addEventListener('click', () => navigateTo(currentImageIndex - 1));
     if (nextBtn) nextBtn.addEventListener('click', () => navigateTo(currentImageIndex + 1));
     if (batchBtn) batchBtn.addEventListener('click', runBatchSegmentation);
+    if (batchStopBtn) batchStopBtn.addEventListener('click', function() {
+        batchProcessingCancelled = true;
+        this.disabled = true;
+        this.innerHTML = '<i class="fas fa-stop"></i> 正在停止...';
+    });
     if (saveBtn) saveBtn.addEventListener('click', saveCurrentResults);
 
     // 手动标注开关
@@ -1275,13 +1395,18 @@ async function buildBaseLayer(imageSrc, detections) {
                 bctx.restore();
             }
 
-            // 无论是否有mask，都绘制bbox与标签
+            // 根据开关状态绘制bbox（但始终显示标签）
             if (detection.box) {
                 const box = detection.box;
-                bctx.strokeStyle = colorHex;
-                bctx.lineWidth = 2;
-                bctx.strokeRect(box.xmin, box.ymin, box.xmax - box.xmin, box.ymax - box.ymin);
 
+                // 只有在showBoundingBoxes为true时才绘制边界框
+                if (showBoundingBoxes) {
+                    bctx.strokeStyle = colorHex;
+                    bctx.lineWidth = 2;
+                    bctx.strokeRect(box.xmin, box.ymin, box.xmax - box.xmin, box.ymax - box.ymin);
+                }
+
+                // 始终显示标签文本
                 const scoreText = typeof detection.score === 'number' ? detection.score.toFixed(2) : '1.00';
                 const labelText = `${sanitizeLabel(detection.label)}: ${scoreText}`;
                 drawTextWithBackground(bctx, labelText, box.xmin, Math.max(2, box.ymin - 18), {
