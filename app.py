@@ -514,8 +514,12 @@ def segment_api():
         use_unipixel = (engine != 'grounding_dino_sam')
 
         # 对统一推理引擎（UniPixel / SAM3 HTTP 等）按请求切换后端
+        sam3_http_url = (data.get('sam3_http_url') or '').strip()
+
         if use_unipixel:
             try:
+                if engine == 'sam3_http' and sam3_http_url:
+                    inference_config.set_sam3_http_url(sam3_http_url)
                 inference_config.set_inference_engine(engine)
                 unified_engine = get_unified_engine()
                 unified_engine.reload()

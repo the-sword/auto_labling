@@ -74,6 +74,11 @@
                                         <option value="grounding_dino_sam">Grounding DINO + SAM</option>
                                     </select>
                                 </div>
+                                <div class="mb-2">
+                                    <label for="sam3UrlInput" class="form-label">SAM3 后端 API 地址（可选）</label>
+                                    <input type="text" class="form-control" id="sam3UrlInput" placeholder="http://localhost:6666/sam3/segment">
+                                    <div class="form-text">仅在选择 "SAM3 (HTTP)" 时生效；留空则使用后端默认配置。</div>
+                                </div>
                             </div>
                             <div class="col-6">
                                 <div class="mb-2">

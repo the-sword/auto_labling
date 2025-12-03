@@ -583,6 +583,7 @@ const queueInfo = document.getElementById('queueInfo');
 const saveBtn = document.getElementById('saveBtn');
 const saveSubdirInput = document.getElementById('saveSubdirInput');
 const engineSelect = document.getElementById('engineSelect');
+const sam3UrlInput = document.getElementById('sam3UrlInput');
 const pointClickToggleBtn = document.getElementById('pointClickToggleBtn');
 
 // 手动标注状态
@@ -851,6 +852,22 @@ function initializeEventListeners() {
             if (polyCollinearValue) polyCollinearValue.textContent = e.target.value;
         });
         if (polyCollinearValue) polyCollinearValue.textContent = polyCollinearSlider.value;
+    }
+
+    const SAM3_URL_STORAGE_KEY = 'auto_labeling_sam3_http_url';
+    if (sam3UrlInput) {
+        const savedUrl = localStorage.getItem(SAM3_URL_STORAGE_KEY) || '';
+        if (savedUrl) {
+            sam3UrlInput.value = savedUrl;
+        }
+        sam3UrlInput.addEventListener('change', () => {
+            const val = sam3UrlInput.value.trim();
+            if (val) {
+                localStorage.setItem(SAM3_URL_STORAGE_KEY, val);
+            } else {
+                localStorage.removeItem(SAM3_URL_STORAGE_KEY);
+            }
+        });
     }
 
     // 操作按钮
@@ -1247,6 +1264,9 @@ async function performSegmentation() {
         };
         if (engineSelect && engineSelect.value) {
             payload.engine = engineSelect.value;
+        }
+        if (engineSelect && engineSelect.value === 'sam3_http' && sam3UrlInput && sam3UrlInput.value.trim()) {
+            payload.sam3_http_url = sam3UrlInput.value.trim();
         }
         if (queueItem && queueItem.serverPath) {
             payload.image_path = queueItem.serverPath;
@@ -2025,21 +2045,25 @@ async function performPointSegmentation(x, y) {
         console.log('Image dimensions:', { width: img.width, height: img.height });
         console.log('Point within bounds:', x >= 0 && x < img.width && y >= 0 && y < img.height);
 
-        // 调用点选分割API
+        const pointPayload = {
+            image: imageBase64,
+            labels: [],
+            point_mode: true,
+            points: [[x, y]],
+            point_labels: [1],
+            threshold: 0.3,
+            engine: 'sam3_http'
+        };
+        if (sam3UrlInput && sam3UrlInput.value.trim()) {
+            pointPayload.sam3_http_url = sam3UrlInput.value.trim();
+        }
+
         const response = await fetch('/api/segment', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                image: imageBase64,
-                labels: [],  // 点选模式不需要标签
-                point_mode: true,
-                points: [[x, y]],
-                point_labels: [1],  // 1表示前景点
-                threshold: 0.3,
-                engine: 'sam3_http'
-            })
+            body: JSON.stringify(pointPayload)
         });
 
         const data = await response.json();

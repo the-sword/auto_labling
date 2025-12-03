@@ -32,3 +32,8 @@ def set_inference_engine(engine: str):
         raise ValueError(f"Invalid engine: {engine}. Must be 'grounding_dino_sam', 'unipixel' or 'sam3_http'")
     INFERENCE_ENGINE = engine
     print(f"Inference engine set to: {engine}")
+
+def set_sam3_http_url(url: str):
+    global SAM3_HTTP_URL
+    SAM3_HTTP_URL = url
+    print(f"SAM3 HTTP URL set to: {url}")
