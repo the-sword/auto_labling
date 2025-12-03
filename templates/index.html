@@ -69,7 +69,6 @@
                                     <label for="engineSelect" class="form-label">推理引擎</label>
                                     <select class="form-select" id="engineSelect">
                                         <option value="">默认（后端配置）</option>
-                                        <option value="unipixel">UniPixel</option>
                                         <option value="sam3_http">SAM3 (HTTP)</option>
                                         <option value="grounding_dino_sam">Grounding DINO + SAM</option>
                                     </select>
@@ -94,7 +93,7 @@
                             </div>
                             <div class="col-6">
                                 <div class="mb-2">
-                                    <label for="polyEpsSlider" class="form-label">轮廓简化强度 ε: <span id="polyEpsValue">2.0</span></label>
+                                    <label for="polyEpsSlider" class="form-label">轮廓简化强度 ε: <span id="polyEpsValue">1.0</span></label>
                                     <input type="range" class="form-range" id="polyEpsSlider" min="0" max="10" step="0.5" value="2.0">
                                     <div class="form-text">点数↓ 精度↓；0 表示不简化</div>
                                 </div>

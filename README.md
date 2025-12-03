@@ -1,14 +1,11 @@
 # SAM任意物体分割 - Grounded Segment Anything
 
-基于Grounding DINO和Segment Anything Model (SAM)的文本引导图像分割Web应用。
+基于 **Grounding DINO**、**Segment Anything Model (SAM)** 和 **SAM3 HTTP 服务** 的文本引导图像分割 Web 应用。
 
-## 🆕 UniPixel集成
+当前支持两种后端推理方式：
 
-现已支持[UniPixel](https://github.com/PolyU-ChenLab/UniPixel)推理引擎，提供更强大的端到端分割能力！
-
-- 查看快速开始：[QUICKSTART_UNIPIXEL.md](QUICKSTART_UNIPIXEL.md)
-- 完整文档：[UNIPIXEL_INTEGRATION.md](UNIPIXEL_INTEGRATION.md)
-- 集成总结：[INTEGRATION_SUMMARY.md](INTEGRATION_SUMMARY.md)
+- **SAM3 (HTTP)**：通过 HTTP 调用远程或本地部署的 SAM3 推理服务，适合多机部署、远程推理。
+- **Grounding DINO + SAM**：本地两阶段检测 + 分割方案，用于向后兼容。
 
 ## 功能特点
 
@@ -25,8 +22,8 @@
 - **Flask**: Web框架
 - **Transformers**: Hugging Face模型库
 - **推理引擎** (可选其一):
-  - **Grounding DINO + SAM**: 两阶段检测分割
-  - **UniPixel** (新): 端到端统一模型，基于Qwen2.5-VL
+  - **SAM3 HTTP**: 调用外部部署的 SAM3 HTTP 服务
+  - **Grounding DINO + SAM**: 本地两阶段检测分割方案
 - **OpenCV**: 图像处理
 - **PyTorch**: 深度学习框架
 
@@ -39,32 +36,24 @@
 
 ## 安装和运行
 
-### 方式1: 使用Grounding DINO + SAM (原有方案)
+### 运行方式
 
 ```bash
 # 1. 安装依赖
 pip install -r requirements.txt
 
-# 2. 运行应用
-python app.py
-```
+# 2. （可选）配置默认推理引擎
+# 默认为 sam3_http，也可以改为 grounding_dino_sam
+export INFERENCE_ENGINE=sam3_http   # 或 grounding_dino_sam
 
-### 方式2: 使用UniPixel (推荐)
+# 3. （可选）配置 SAM3 HTTP 服务地址
+export SAM3_HTTP_URL=http://localhost:6666/sam3/segment
 
-```bash
-# 1. 安装UniPixel依赖
-bash setup_unipixel.sh
-
-# 2. 设置使用UniPixel引擎
-export INFERENCE_ENGINE=unipixel
-
-# 3. 运行应用
+# 4. 运行应用
 python app.py
 ```
 
 应用将在 `http://localhost:5000` 启动。
-
-**详细安装指南**: 查看 [QUICKSTART_UNIPIXEL.md](QUICKSTART_UNIPIXEL.md)
 
 ## 使用说明
 

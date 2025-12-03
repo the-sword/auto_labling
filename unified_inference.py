@@ -19,10 +19,7 @@ class UnifiedInferenceEngine:
         if self._backend is not None:
             return self._backend
 
-        if self.engine_type == 'unipixel':
-            from unipixel_inference import get_unipixel_model
-            self._backend = get_unipixel_model(inference_config.UNIPIXEL_MODEL_PATH)
-        elif self.engine_type == 'sam3_http':
+        if self.engine_type == 'sam3_http':
             from sam3_http_inference import Sam3HTTPInference
             self._backend = Sam3HTTPInference(inference_config.SAM3_HTTP_URL)
         elif self.engine_type == 'grounding_dino_sam':

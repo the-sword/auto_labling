@@ -4,10 +4,7 @@
 
 import os
 
-INFERENCE_ENGINE = os.getenv('INFERENCE_ENGINE', 'unipixel')
-
-# UniPixel模型配置
-UNIPIXEL_MODEL_PATH = os.getenv('UNIPIXEL_MODEL_PATH', 'PolyU-ChenLab/UniPixel-3B')
+INFERENCE_ENGINE = os.getenv('INFERENCE_ENGINE', 'sam3_http')
 
 # Grounding DINO + SAM配置（用于向后兼容）
 GROUNDING_DINO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models/grounding-dino-tiny")
@@ -21,15 +18,14 @@ def get_inference_engine():
     return INFERENCE_ENGINE
 
 def set_inference_engine(engine: str):
-    """
-    设置推理引擎
+    """设置推理引擎
 
     Args:
-        engine: 'grounding_dino_sam' 或 'unipixel' 或 'sam3_http'
+        engine: 'grounding_dino_sam' 或 'sam3_http'
     """
     global INFERENCE_ENGINE
-    if engine not in ['grounding_dino_sam', 'unipixel', 'sam3_http']:
-        raise ValueError(f"Invalid engine: {engine}. Must be 'grounding_dino_sam', 'unipixel' or 'sam3_http'")
+    if engine not in ['grounding_dino_sam', 'sam3_http']:
+        raise ValueError(f"Invalid engine: {engine}. Must be 'grounding_dino_sam' or 'sam3_http'")
     INFERENCE_ENGINE = engine
     print(f"Inference engine set to: {engine}")
 

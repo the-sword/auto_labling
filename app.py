@@ -386,7 +386,7 @@ def grounded_segmentation_batch(image_datas: List[bytes], labels: List[str], thr
     return images_np, dets_b
 
 def unified_segmentation(image_data: bytes, labels: List[str], threshold: float = 0.3,
-                         use_unipixel: bool = True,
+                         use_unified_backend: bool = True,
                          polygon_refinement: bool = False, mask_iou_threshold: float = 0.5,
                          poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Tuple[np.ndarray, List[DetectionResult]]:
     """使用统一推理引擎执行图像分割
@@ -395,7 +395,7 @@ def unified_segmentation(image_data: bytes, labels: List[str], threshold: float 
         image_data: 图片字节数据
         labels: 标签列表
         threshold: 置信度阈值
-        use_unipixel: 是否使用UniPixel（False则使用Grounding DINO+SAM）
+        use_unified_backend: 是否使用统一推理引擎（False则使用Grounding DINO+SAM）
         polygon_refinement: 多边形优化
         mask_iou_threshold: mask IoU阈值
         poly_simplify_eps: 多边形简化参数
@@ -404,8 +404,8 @@ def unified_segmentation(image_data: bytes, labels: List[str], threshold: float 
     Returns:
         (image_array, detections)
     """
-    if use_unipixel:
-        # 使用UniPixel统一推理引擎
+    if use_unified_backend:
+        # 使用统一推理引擎
         unified_engine = get_unified_engine()
         image = load_image(image_data)
         detections = unified_engine.segment(image, labels, threshold)
@@ -416,7 +416,7 @@ def unified_segmentation(image_data: bytes, labels: List[str], threshold: float 
                                     mask_iou_threshold, poly_simplify_eps, poly_collinear_eps)
 
 def unified_segmentation_batch(image_datas: List[bytes], labels: List[str], threshold: float = 0.3,
-                               use_unipixel: bool = True,
+                               use_unified_backend: bool = True,
                                polygon_refinement: bool = False, mask_iou_threshold: float = 0.5,
                                poly_simplify_eps: float = 2.0, poly_collinear_eps: float = 1.0) -> Tuple[List[np.ndarray], List[List[DetectionResult]]]:
     """使用统一推理引擎执行批量图像分割
@@ -425,7 +425,7 @@ def unified_segmentation_batch(image_datas: List[bytes], labels: List[str], thre
         image_datas: 图片字节数据列表
         labels: 标签列表
         threshold: 置信度阈值
-        use_unipixel: 是否使用UniPixel
+        use_unified_backend: 是否使用统一推理引擎
         polygon_refinement: 多边形优化
         mask_iou_threshold: mask IoU阈值
         poly_simplify_eps: 多边形简化参数
@@ -434,8 +434,8 @@ def unified_segmentation_batch(image_datas: List[bytes], labels: List[str], thre
     Returns:
         (images_np_list, detections_per_image)
     """
-    if use_unipixel:
-        # 使用UniPixel统一推理引擎
+    if use_unified_backend:
+        # 使用统一推理引擎
         unified_engine = get_unified_engine()
         images = [load_image(b) for b in image_datas]
         dets_b = unified_engine.segment_batch(images, labels, threshold)
@@ -509,14 +509,14 @@ def segment_api():
 
         # 推理引擎选择（可通过请求参数指定，默认使用配置的引擎）
         engine = data.get('engine', inference_config.get_inference_engine())
-        if engine not in ['grounding_dino_sam', 'unipixel', 'sam3_http']:
+        if engine not in ['grounding_dino_sam', 'sam3_http']:
             engine = inference_config.get_inference_engine()
-        use_unipixel = (engine != 'grounding_dino_sam')
+        use_unified_backend = (engine != 'grounding_dino_sam')
 
-        # 对统一推理引擎（UniPixel / SAM3 HTTP 等）按请求切换后端
+        # 对统一推理引擎（SAM3 HTTP 等）按请求切换后端
         sam3_http_url = (data.get('sam3_http_url') or '').strip()
 
-        if use_unipixel:
+        if use_unified_backend:
             try:
                 if engine == 'sam3_http' and sam3_http_url:
                     inference_config.set_sam3_http_url(sam3_http_url)
@@ -583,7 +583,7 @@ def segment_api():
                 return jsonify({'success': False, 'error': 'no valid images to process'}), 400
 
             images_np, dets_list = unified_segmentation_batch(
-                valid_bytes, labels, threshold, use_unipixel,
+                valid_bytes, labels, threshold, use_unified_backend,
                 polygon_refinement, mask_iou_threshold,
                 poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps
             )
@@ -685,7 +685,7 @@ def segment_api():
             # 传统标签分割模式
             # 执行分割（使用统一推理引擎）
             image_array, detections = unified_segmentation(
-                image_data, labels, threshold, use_unipixel,
+                image_data, labels, threshold, use_unified_backend,
                 polygon_refinement, mask_iou_threshold,
                 poly_simplify_eps=poly_simplify_eps, poly_collinear_eps=poly_collinear_eps
             )
