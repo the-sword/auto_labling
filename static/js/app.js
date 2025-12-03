@@ -593,24 +593,24 @@ let annotationPoints = [];
 // 预定义标签（可点击快速添加）
 const PREDEFINED_LABELS = [
     'obstacle',
-    'dung',
+    // 'dung',
     'fence',
     'adult',
     'pet',
     // 'leaf',
-    'chargingstation',
+    // 'chargingstation',
     'manholecover',
     'water',
     'flatstone',
-    'flatspraycan',
+    // 'flatspraycan',
     'pipeline',
     'mud',
     'child',
     'hedgehog',
     'fruit',
-    'greenplants',
-    'grass',
-    'road'
+    // 'greenplants',
+    // 'grass',
+    // 'road'
     // 'background'
 ];
 
